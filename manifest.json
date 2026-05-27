@@ -1,0 +1,16 @@
+{
+  "Name": "Forage Tracker",
+  "Author": "MadeInBoulogne",
+  "Version": "1.0.0",
+  "Description": "Shows daily forageable counts and icons on the map tooltip for each area.",
+  "UniqueID": "MadeInBoulogne.ForageTracker",
+  "EntryDll": "ForageTrackerModSV.dll",
+  "MinimumApiVersion": "3.18.0",
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ],
+  "UpdateKeys": []
+}
