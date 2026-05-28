@@ -168,12 +168,20 @@ namespace ForageTrackerMod
                 getValue: () => _config.Enabled,
                 setValue: v => { _config.Enabled = v; SetEnabled(v); });
 
-            gmcm.AddBoolOption(
+            gmcm.AddTextOption(
                 mod: ModManifest,
-                name: () => "Show Item Icons",
-                tooltip: () => "Display a small item icon next to each forage entry in the tooltip.",
-                getValue: () => _config.ShowIcons,
-                setValue: v => _config.ShowIcons = v);
+                name: () => "Display Mode",
+                tooltip: () => "Choose what to show per forage entry: icon + text, icon only, or text only.",
+                getValue: () => _config.Display.ToString(),
+                setValue: v => _config.Display = Enum.Parse<DisplayMode>(v),
+                allowedValues: new[] { "Both", "IconOnly", "TextOnly" },
+                formatAllowedValue: v => v switch
+                {
+                    "Both" => "Icon + Text",
+                    "IconOnly" => "Icon Only",
+                    "TextOnly" => "Text Only",
+                    _ => v
+                });
 
             gmcm.AddBoolOption(
                 mod: ModManifest,
