@@ -19,7 +19,7 @@ namespace ForageTrackerMod
         public DisplayMode Display { get; set; } = DisplayMode.Both;
 
         /// <summary>Show a count of remaining (un-picked) forageables per area.</summary>
-        public bool ShowRemainingOnly { get; set; } = false;
+        public bool ShowRemainingOnly { get; set; } = true;
 
         /// <summary>Scale multiplier for icons drawn in the tooltip (1.0 = auto-scale to display).</summary>
         public float IconScale { get; set; } = 1.0f;
