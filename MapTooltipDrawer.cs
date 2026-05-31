@@ -166,7 +166,14 @@ namespace ForageTrackerMod
         /// </summary>
         private static void DrawDebugOverlay(SpriteBatch b, MapPage mapPage, Rectangle mapImageRect)
         {
-            string mapKey = MapKeyHelper.GetMapKey(mapPage);
+            DrawDebugBorder(b, mapImageRect, Color.Red,4);
+
+            var pageRect = new Rectangle( mapPage.xPositionOnScreen, mapPage.yPositionOnScreen, mapPage.width, mapPage.height);
+
+            DrawDebugBorder(b, pageRect, Color.Blue, 2);
+
+            string liveKey   = MapKeyHelper.GetMapKey(mapPage);
+            string editorKey = ResolveEditorKey(liveKey);
 
             int mouseX = Game1.getMouseX();
             int mouseY = Game1.getMouseY();
