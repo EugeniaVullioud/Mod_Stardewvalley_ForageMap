@@ -550,7 +550,7 @@ Color.Blue);
             _lineHeight   = _iconPx + 6f * ui;
             _padding      = 20f * ui;
             _textScale    = 0.75f * ui;
-            _headerHeight = Game1.smallFont.MeasureString("Forage today:").Y * _textScale;
+            _headerHeight = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).Y * _textScale;
         }
 
         // =========================================================================
@@ -595,7 +595,7 @@ Color.Blue);
             if (s_lineBuffer.Count == 0) return;
 
             float iconColW = showIcons ? _iconPx + 6f * _cachedUiScale : 0f;
-            float headerW  = Game1.smallFont.MeasureString("Forage today:").X * _textScale;
+            float headerW  = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).X * _textScale;
             float contentW = Math.Max(headerW, iconColW + maxLabelW);
             float boxW     = contentW + _padding * 2f;
             float boxH     = _padding * 2f + _headerHeight + 4f * _cachedUiScale
@@ -619,7 +619,7 @@ Color.Blue);
             float cx = bx + _padding;
             float cy = by + _padding;
 
-            b.DrawString(Game1.smallFont, "Forage today:", new Vector2(cx, cy),
+            b.DrawString(Game1.smallFont, DrawerUIStrings.Forage, new Vector2(cx, cy),
                 Game1.textColor, 0f, Vector2.Zero, _textScale, SpriteEffects.None, 1f);
             cy += _headerHeight + 4f * _cachedUiScale;
 

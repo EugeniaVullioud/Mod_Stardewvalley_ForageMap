@@ -574,21 +574,20 @@ namespace ForageTrackerMod
             int tx = _sideArea.X + Pad;
             int ty = _sideArea.Y + Pad;
 
-            b.DrawString(Game1.dialogueFont, "Edit Regions",
-                new Vector2(tx, ty), Game1.textColor,
+            b.DrawString(Game1.dialogueFont, EditorUIStrings.EditRegions, new Vector2(tx, ty), Game1.textColor,
                 0f, Vector2.Zero, 0.65f, SpriteEffects.None, 1f);
 
             // Show which map tab is active and what it means
             ty += 30;
-            b.DrawString(Game1.smallFont, $"Map: {_currentMapKey}",
+            b.DrawString(Game1.smallFont, $"{EditorUIStrings.Map} {_currentMapKey}",
                 new Vector2(tx, ty), Game1.textColor,
                 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
             ty += 20;
             string mapHint = _currentMapKey switch
             {
-                "Town"   => "Main Stardew Valley world map",
-                "Island" => "Ginger Island map",
-                _        => $"Custom / modded map: \"{_currentMapKey}\""
+                "Town"   => EditorUIStrings.TownMapHint,
+                "Island" => EditorUIStrings.IslandMapHint,
+                _        => $"{EditorUIStrings.CustomMapHint} \"{_currentMapKey}\""
             };
             b.DrawString(Game1.smallFont, mapHint,
                 new Vector2(tx, ty), Game1.textColor * 0.6f,
@@ -599,19 +598,19 @@ namespace ForageTrackerMod
                 var r = _currentRegions[_sel];
 
                 // Name field
-                b.DrawString(Game1.smallFont, "Area Name:",
+                b.DrawString(Game1.smallFont, EditorUIStrings.AreaName,
                     new Vector2(tx, _nameFieldRect.Y - 18), Game1.textColor,
                     0f, Vector2.Zero, 0.65f, SpriteEffects.None, 1f);
                 DrawTextField(b, _nameFieldRect, _fieldName, _nameFocused);
 
                 // Location section header
-                b.DrawString(Game1.smallFont, "SDV Locations:",
+                b.DrawString(Game1.smallFont, EditorUIStrings.SDVLocations,
                     new Vector2(tx, _locDropdownRect.Y - 18), Game1.textColor,
                     0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
 
                 // Dropdown
                 DrawDropdownBox(b, _locDropdownRect);
-                DrawButton(b, _btnAddLocRect, "+ Add", Color.White);
+                DrawButton(b, _btnAddLocRect, EditorUIStrings.AddLocation, Color.White);
 
                 // ── Scrollable location list ──────────────────────────────────
                 int locListX  = tx;
@@ -641,7 +640,7 @@ namespace ForageTrackerMod
                         new Vector2(locRect.X + 4, locRect.Y + 5),
                         Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
-                    DrawButton(b, removeRect, "✕", new Color(220, 100, 100));
+                    DrawButton(b, removeRect, EditorUIStrings.DeleteFromDropdown, new Color(220, 100, 100));
                 }
 
                 // Scrollbar
@@ -669,23 +668,15 @@ namespace ForageTrackerMod
                 }
 
                 // Color button
-                DrawButton(b, _btnColorRect, "Cycle Color", Color.White);
+                DrawButton(b, _btnColorRect, EditorUIStrings.CycleAreaColor, Color.White);
                 b.Draw(Game1.fadeToBlackRect,
                     new Rectangle(_btnColorRect.Right - BtnH + 4,
                                   _btnColorRect.Y + 4, BtnH - 8, BtnH - 8),  r.Color);
 
                
                 // Opacity 
-                b.DrawString( Game1.smallFont,
-                    $"Opacity: {r.Opacity}",
-                    new Vector2(_opacitySliderRect.X,
-                                _opacitySliderRect.Y - 18),
-                    Color.White,
-                    0f,
-                    Vector2.Zero,
-                    0.6f,
-                    SpriteEffects.None,
-                    1f);
+                b.DrawString( Game1.smallFont,$"{EditorUIStrings.Opacity} {r.Opacity}",
+                    new Vector2(_opacitySliderRect.X, _opacitySliderRect.Y - 18),Color.White, 0f, Vector2.Zero, 0.6f,SpriteEffects.None,1f);
 
                 b.Draw( Game1.fadeToBlackRect, _opacitySliderRect,  Color.Black * 0.6f); // Track
                 DrawBorder( b, _opacitySliderRect, Color.White,  1);
@@ -698,20 +689,13 @@ namespace ForageTrackerMod
                 b.Draw( Game1.fadeToBlackRect, new Rectangle( thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
 
 
-                DrawButton(b, _btnTextColorRect, "Cycle Text Color", Color.White);
+                DrawButton(b, _btnTextColorRect, EditorUIStrings.CycleTextColor, Color.White);
 
-                b.DrawString( Game1.smallFont, $"Text Size: {_cfg.RegionLabelScale:F2}", new Vector2( _textScaleSliderRect.X, _textScaleSliderRect.Y - 18), Color.White,  0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                b.DrawString( Game1.smallFont, $"{EditorUIStrings.TextSize} {_cfg.RegionLabelScale:F2}", new Vector2( _textScaleSliderRect.X, _textScaleSliderRect.Y - 18), Color.White,  0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
-                b.Draw(
-                    Game1.fadeToBlackRect,
-                    _textScaleSliderRect,
-                    Color.Black * 0.6f);
+                b.Draw( Game1.fadeToBlackRect, _textScaleSliderRect, Color.Black * 0.6f);
 
-                DrawBorder(
-                    b,
-                    _textScaleSliderRect,
-                    Color.White,
-                    1);
+                DrawBorder(b,_textScaleSliderRect, Color.White, 1);
 
                 float pctTxt = (_cfg.RegionLabelScale - 0.4f) / (1.5f - 0.4f);
 
@@ -720,7 +704,7 @@ namespace ForageTrackerMod
                 b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXText - 4, _textScaleSliderRect.Y - 2, 8, _textScaleSliderRect.Height + 4), Color.White);
 
                 // Drag border
-                b.DrawString(Game1.smallFont, $"Border Tolerance: {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                b.DrawString(Game1.smallFont, $"{EditorUIStrings.BorderTolerance} {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
                 b.Draw(Game1.fadeToBlackRect,  _edgeGrabSliderRect, Color.Black * 0.6f);
                 
@@ -736,8 +720,7 @@ namespace ForageTrackerMod
             }
             else
             {
-                b.DrawString(Game1.smallFont,
-                    "Click a rectangle on\nthe map to select it,\nor press + Add Region.",
+                b.DrawString(Game1.smallFont, EditorUIStrings.ClickRegionHint,
                     new Vector2(tx, _sideArea.Y + Pad + 54),
                     Game1.textColor * 0.7f, 0f, Vector2.Zero, 0.68f, SpriteEffects.None, 1f);
             }
@@ -747,12 +730,12 @@ namespace ForageTrackerMod
             bool   isBound = _bindings.TryGetValue(_currentMapKey, out var boundTo)
                              && boundTo == liveKey;
 
-            string bindLabel = isBound ? $"✓ {liveKey}" : $"⚑ Bind: {liveKey}";
+            string bindLabel = isBound ? $"✓ {liveKey}" : $"{EditorUIStrings.Bind} {liveKey}";
             Color  bindColor = isBound ? new Color(140, 220, 140) : new Color(220, 200, 100);
             DrawButton(b, _btnBindRect, bindLabel, bindColor);
 
             bool canDelete = _mapKeys.Count > 1; // must always keep at least one tab
-            DrawButton(b, _btnDelMapRect, "🗑 Del Map",
+            DrawButton(b, _btnDelMapRect, EditorUIStrings.DeleteMap,
                 canDelete ? new Color(220, 100, 80) : Color.Gray * 0.5f);
 
             // ── Binding status banners ────────────────────────────────────────
@@ -760,23 +743,21 @@ namespace ForageTrackerMod
             bool hasAnyBinding = _bindings.ContainsKey(_currentMapKey);
             if (!hasAnyBinding)
             {
-                string warn = "⚠ This map tab is not bound to any in-game map.\n" +
-                              "Press \"Bind to: ...\" above to link it.";
-                DrawStatusBanner(b, warn, new Color(220, 160, 40), new Color(80, 50, 0, 200));
+                DrawStatusBanner(b, EditorUIStrings.UnboundMapWarning, new Color(220, 160, 40), new Color(80, 50, 0, 200));
             }
             // (2) Wrong-map notice — has a binding but it's for a different live key
             else if (!isBound)
             {
-                string notice = $"You are editing \"{_currentMapKey}\" " +
-                                $"(bound to \"{boundTo}\").\n" +
-                                $"Current in-game map: \"{liveKey}\".";
+                string notice = $"{EditorUIStrings.EditingNotCurrentWarning} \"{_currentMapKey}\" " +
+                                $"{EditorUIStrings.EditingNotCurrentWarningBound} \"{boundTo}\").\n" +
+                                $"{EditorUIStrings.EditingNotCurrentWarningCurrentIs} \"{liveKey}\".";
                 DrawStatusBanner(b, notice, Color.Yellow, new Color(0, 0, 0, 200));
             }
 
-            DrawButton(b, _btnAddRegionRect, "+ Add Region",   Color.White);
-            DrawButton(b, _btnDelRegionRect, "✕ Delete",       _sel >= 0 ? Color.White : Color.Gray * 0.5f);
-            DrawButton(b, _btnSaveRect,      "💾 Save",        new Color(140, 220, 140));
-            DrawButton(b, _btnCancelRect,    "✕ Cancel",       new Color(220, 120, 120));
+            DrawButton(b, _btnAddRegionRect, EditorUIStrings.AddRegion,   Color.White);
+            DrawButton(b, _btnDelRegionRect, EditorUIStrings.Delete,       _sel >= 0 ? Color.White : Color.Gray * 0.5f);
+            DrawButton(b, _btnSaveRect, EditorUIStrings.Save,        new Color(140, 220, 140));
+            DrawButton(b, _btnCancelRect, EditorUIStrings.Cancel,       new Color(220, 120, 120));
 
             // ── Dropdown overlay (drawn last so it's on top) ──────────────────
             if (_dropdownOpen)
@@ -853,12 +834,9 @@ namespace ForageTrackerMod
 
             _btnTabRightRect = new Rectangle( _mapArea.Right - newMapWw - TabArrowW - 4,  tabY, TabArrowW,  TabH);
 
-            if (hiddenLeft)
-                DrawButton(b, _btnTabLeftRect, "<", Color.White);
+            if (hiddenLeft) DrawButton(b, _btnTabLeftRect, EditorUIStrings.LeftArrow, Color.White);
 
-            if (hiddenRight)
-                DrawButton(b, _btnTabRightRect, ">", Color.White);
-
+            if (hiddenRight) DrawButton(b, _btnTabRightRect, EditorUIStrings.RightArrow, Color.White);
 
 
             const float scale = 0.68f;
@@ -874,8 +852,7 @@ namespace ForageTrackerMod
                 int regionCount =
                     _editMaps[key].Count;
 
-                string label =
-                    $"  {key}  ({regionCount})";
+                string label = $"  {key}  ({regionCount})";
 
                 int tw =
                     GetTabWidth(key);
@@ -958,7 +935,7 @@ namespace ForageTrackerMod
             DrawButton(
                 b,
                 _btnNewMapRect,
-                "+ New Map",
+                EditorUIStrings.NewMap,
                 Color.White);
         }
 
@@ -966,9 +943,7 @@ namespace ForageTrackerMod
 
         private void DrawDropdownBox(SpriteBatch b, Rectangle r)
         {
-            string preview = _sel >= 0 && _dropdownOpen == false
-                ? "(select location...)"
-                : "(select location...)";
+            string preview = _sel >= 0 && _dropdownOpen == false ? EditorUIStrings.SelectLocation : EditorUIStrings.SelectLocation;
 
             b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.5f);
             DrawBorder(b, r, _dropdownOpen ? Color.White : Color.Gray, 2);
@@ -977,7 +952,7 @@ namespace ForageTrackerMod
                 Color.White * 0.7f, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
             // Down-arrow indicator
-            b.DrawString(Game1.smallFont, "▼",
+            b.DrawString(Game1.smallFont, EditorUIStrings.DownDropdown,
                 new Vector2(r.Right - 20, r.Y + 8),
                 Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
         }
@@ -1033,7 +1008,7 @@ namespace ForageTrackerMod
                 new Rectangle(0, 256, 60, 60),
                 dx, dy, dw, dh, Color.White, drawShadow: true);
 
-            b.DrawString(Game1.smallFont, "New map key name:",
+            b.DrawString(Game1.smallFont, EditorUIStrings.NewMapTitle,
                 new Vector2(dx + 16, dy + 16), Game1.textColor,
                 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
 
@@ -1052,8 +1027,8 @@ namespace ForageTrackerMod
             var ok     = new Rectangle(dx + 16,       dy + dh - 52, (dw - 48) / 2, 36);
             var cancel = new Rectangle(ok.Right + 16,  dy + dh - 52, (dw - 48) / 2, 36);
 
-            DrawButton(b, ok,     "✓ Create", new Color(140, 220, 140));
-            DrawButton(b, cancel, "✕ Cancel", new Color(220, 120, 120));
+            DrawButton(b, ok, EditorUIStrings.Create, new Color(140, 220, 140));
+            DrawButton(b, cancel, EditorUIStrings.Cancel, new Color(220, 120, 120));
         }
         private void DrawDeleteMapDialog(SpriteBatch b)
         {
@@ -1075,7 +1050,7 @@ namespace ForageTrackerMod
                 drawShadow: true);
 
             string msg =
-                $"Delete map tab\n\"{_mapPendingDelete}\"?\n\nThis cannot be undone.";
+                $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n{EditorUIStrings.ConfirmDeleteMapWarning}";
 
             b.DrawString(
                 Game1.smallFont,
@@ -1105,13 +1080,13 @@ namespace ForageTrackerMod
             DrawButton(
                 b,
                 deleteBtn,
-                "Delete",
+               EditorUIStrings.Delete,
                 new Color(220, 100, 80));
 
             DrawButton(
                 b,
                 cancelBtn,
-                "Cancel",
+                EditorUIStrings.CancelSimple,
                 new Color(140, 140, 140));
         }
         // ── Input ─────────────────────────────────────────────────────────────
@@ -1703,7 +1678,7 @@ namespace ForageTrackerMod
             CommitName();
             var region = new MapRegionData
             {
-                Name = "New Area",
+                Name = EditorUIStrings.NewAreaDefault,
                 Locations = new(),
                 Left = 0.35f,
                 Top = 0.35f,
@@ -1737,16 +1712,7 @@ namespace ForageTrackerMod
                 ? Color.Black
                 : Color.White;
         }
-        private void AutoContrastTextColor()
-        {
-            if (_sel < 0)
-                return;
-
-            var r = _currentRegions[_sel];
-
-            r.TextColor =
-                GetContrastColor(r.Color);
-        }
+        
         private void CycleTextColor()
         {
             if (_sel < 0)
@@ -1832,8 +1798,7 @@ namespace ForageTrackerMod
             _cfg.Bindings = new Dictionary<string, string>(_bindings);
             _onSave(_cfg);
             exitThisMenu();
-            Game1.addHUDMessage(new HUDMessage(
-                "Forage Tracker: regions saved.", HUDMessage.newQuest_type));
+            Game1.addHUDMessage(new HUDMessage( EditorUIStrings.RegionsSaved, HUDMessage.newQuest_type));
         }
 
         // ── Hit testing ───────────────────────────────────────────────────────
