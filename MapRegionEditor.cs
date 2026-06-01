@@ -47,6 +47,7 @@ namespace ForageTrackerMod
         private const int BtnH      = 40;
         private const int TabH      = 44;   // taller tabs so text is comfortable
         private const float MinFrac = 0.02f;
+        private const int TabMapGap = 8; // space between tabs and map
 
         private static readonly Color[] Palette =
         {
@@ -216,7 +217,7 @@ namespace ForageTrackerMod
             const int NativeMapH = 720;
 
             int availW = sw - SidebarW - Pad * 3;
-            int availH = sh - Pad * 2 - TabH - Pad;
+            int availH = sh - Pad * 2 - TabH - TabMapGap;
 
             float scaleX = (float)availW / NativeMapW;
             float scaleY = (float)availH / NativeMapH;
@@ -226,7 +227,7 @@ namespace ForageTrackerMod
             int mapH = (int)(NativeMapH * scale);
             // Centre the image in the available panel space
             int mapX = Pad + (availW - mapW) / 2;
-            int mapY = Pad + TabH + Pad + (availH - mapH) / 2;
+            int mapY = Pad + TabH + TabMapGap + (availH - mapH) / 2;
 
             _mapPanel = new Rectangle(mapX, mapY, mapW, mapH);
             //_mapArea  = _mapPanel;  // they are identical — no wasted border space
@@ -385,7 +386,9 @@ namespace ForageTrackerMod
                 bool isSel = i == _sel;
                 bool isHov = !isSel && sr.Contains(mx, my);
 
-                b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? 0.55f : 0.4f));
+                float alpha = r.Opacity / 255f;
+
+                b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? alpha : alpha *0.85f));
                 DrawBorder(b, sr, isSel ? Color.White : (isHov ? Color.Yellow : r.Color), isSel ? 3 : (isHov ? 2 : 1));
 
                 if (sr.Width > 40)
@@ -399,9 +402,9 @@ namespace ForageTrackerMod
 
                     // Visualize grab zones
                     // Opacity-based visibility
-                    byte alpha = (byte)Math.Min(255, _currentRegions[_sel].Opacity *1.15f); // +15%
+                    byte alphaVis = (byte)Math.Min(255, _currentRegions[_sel].Opacity *1.15f); // +15%
                     Color dragZone = _currentRegions[_sel].Color;
-                    dragZone.A = alpha;
+                    dragZone.A = alphaVis;
 
                     // LEFT
                     b.Draw(
@@ -628,12 +631,7 @@ namespace ForageTrackerMod
                 thumbWidth = Math.Clamp(thumbWidth, 6, 30);
 
                 b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXBorder - 4, _edgeGrabSliderRect.Y - 2, 8, _edgeGrabSliderRect.Height + 4),  Color.White);
-
-                // Coords
-                int coordY = _btnColorRect.Bottom + 6;
-                b.DrawString(Game1.smallFont, $"L:{r.Left:F3}  R:{r.Right:F3}\nT:{r.Top:F3}  B:{r.Bottom:F3}",
-                    new Vector2(tx, coordY), Game1.textColor * 0.75f,
-                    0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+               
             }
             else
             {
@@ -704,7 +702,7 @@ namespace ForageTrackerMod
 
             // Tabs sit directly above _mapArea so they visually connect to the map box.
             // _mapArea.Y - TabH - 2 puts them flush against the top border.
-            int tabY = _mapArea.Y - TabH - 2;
+            int tabY = _mapArea.Y - TabH - TabMapGap;
             int x    = _mapArea.X;
 
             // Measure each tab width from its label
@@ -1402,7 +1400,8 @@ namespace ForageTrackerMod
         {
             Name = r.Name, Locations = new(r.Locations),
             Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom,
-            ColorPacked = r.ColorPacked
+            ColorPacked = r.ColorPacked,
+            Opacity = r.Opacity
         };
 
         /// <summary>
