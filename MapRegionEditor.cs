@@ -170,21 +170,73 @@ namespace ForageTrackerMod
                 ? new Dictionary<string, string>(cfg.Bindings)
                 : new Dictionary<string, string>();
 
-            // Build the map page for the visual reference
+            // ── Build the sidebar and map panel ──────────────────────────────
             int sw = Game1.uiViewport.Width;
             int sh = Game1.uiViewport.Height;
 
             _sideArea = new Rectangle(sw - SidebarW - Pad, Pad, SidebarW, sh - Pad * 2);
 
-            int panelW = sw - SidebarW - Pad * 3;
-            int panelH = sh - Pad * 2 - TabH - Pad; // leave room for tab bar at top
-            _mapPanel = new Rectangle(Pad, Pad + TabH + Pad, panelW, panelH);
+            // ── Compute _mapArea by letterboxing the native map image size ────
+            //
+            // WHY NOT USE MapPage / GameMenu:
+            //   In SDV 1.6, MapPage.draw() uses Game1.mapDisplayDevice which
+            //   stretches the world map to fill the MapPage's full
+            //   xPositionOnScreen/yPositionOnScreen/width/height bounds with NO
+            //   letterboxing. Creating a throwaway GameMenu returns its MapPage
+            //   bounds, which equal nearly the full viewport — so the letterbox
+            //   calculation in the editor produced an _mapArea almost as large as
+            //   the screen, leaving the map drawn over a huge background square.
+            //
+            // THE FIX:
+            //   Letterbox the NATIVE MAP IMAGE DIMENSIONS into the available
+            //   editor panel space ourselves. The native Stardew Valley world map
+            //   image is 1360 × 720 pixels (this is the source rect SDV uses when
+            //   rendering via mapDisplayDevice in 1.6). Letterboxing this into
+            //   the panel gives us the correct proportional display rect.
+            //
+            //   The tooltip side (MapTooltipDrawer) uses the live MapPage bounds
+            //   directly (they ARE the draw rect in 1.6 — no letterbox there).
+            //   We reconcile these two coordinate systems by storing _mapArea and
+            //   using it for ALL fraction ↔ pixel conversions in the editor, while
+            //   the tooltip stores its rect in LastLiveMapRect. The two rects have
+            //   the same ASPECT RATIO, so the fractions are equivalent even though
+            //   the absolute pixel positions differ.
+            //
+            // Native map image size — matches the SDV 1.6 world map source.
+            // If a modded map has a different size the regions will still work
+            // correctly as long as the aspect ratio is similar; the player can
+            // adjust region boundaries visually in the editor.
+            const int NativeMapW = 1360;
+            const int NativeMapH = 720;
 
-            _mapPage = new MapPage(
-                _mapPanel.X, _mapPanel.Y,
-                _mapPanel.Width, _mapPanel.Height);
+            int availW = sw - SidebarW - Pad * 3;
+            int availH = sh - Pad * 2 - TabH - Pad;
 
-            RefreshMapArea();
+            float scaleX = (float)availW / NativeMapW;
+            float scaleY = (float)availH / NativeMapH;
+            float scale  = Math.Min(scaleX, scaleY);
+
+            int mapW = (int)(NativeMapW * scale);
+            int mapH = (int)(NativeMapH * scale);
+            // Centre the image in the available panel space
+            int mapX = Pad + (availW - mapW) / 2;
+            int mapY = Pad + TabH + Pad + (availH - mapH) / 2;
+
+            _mapPanel = new Rectangle(mapX, mapY, mapW, mapH);
+            //_mapArea  = _mapPanel;  // they are identical — no wasted border space
+            // MapPage is constructed to exactly match _mapArea so its content
+            // lines up with the region overlays we draw on top.
+            // In SDV 1.6 MapPage stretches its content to fill its bounds,
+            // so giving it our letterboxed rect produces the correct display.
+            _mapPage = new MapPage(mapX, mapY, mapW, mapH);
+            _mapArea = MapRenderUtility.ComputeActualMapRect(_mapPage);
+
+
+            // Publish our computed rect so MapTooltipDrawer can compare if needed.
+            // The live tooltip uses the real GameMenu MapPage bounds (which are
+            // the full draw area in 1.6), so LastLiveMapRect is NOT used for
+            // fraction math in the editor — only _mapArea is.
+            MapTooltipDrawer.LastLiveMapRect ??= new Rectangle(mapX, mapY, mapW, mapH);
 
             // Build location list: hardcoded known locations + runtime tracker data
             _allLocations = BuildKnownLocations();
@@ -213,67 +265,21 @@ namespace ForageTrackerMod
             if (char.IsControl(c)) return;
 
             if (_newMapDialogOpen)
-                _newMapName += c;
+            {
+                _newMapName  += c;
+                _newMapError  = ""; // clear error as soon as they type
+            }
             else if (_nameFocused)
-                _fieldName  += c;
+                _fieldName += c;
         }
 
         // ── Layout ────────────────────────────────────────────────────────────
 
         private void RefreshMapArea()
         {
-            // We must produce a _mapArea rect that:
-            //   (a) fits entirely within _mapPanel (no scissor overflow)
-            //   (b) has the same ASPECT RATIO as the live map so fractions match
-            //
-            // The live map's MapPage bounds (LastLiveMapRect W×H) give us the
-            // aspect ratio SDV actually renders at.  We letterbox that ratio into
-            // _mapPanel so the image is as large as possible without overflowing.
-            //
-            // MapTooltipDrawer uses its own live rect directly, so its fractions
-            // are computed against W×H = live.Width × live.Height.
-            // Here we scale those same dimensions uniformly, which preserves every
-            // fraction identically — only the absolute pixel positions change.
-
-            int panelW = _mapPanel.Width;
-            int panelH = _mapPanel.Height;
-
-            int srcW, srcH;
-
-            if (MapTooltipDrawer.LastLiveMapRect.HasValue)
-            {
-                var live = MapTooltipDrawer.LastLiveMapRect.Value;
-                srcW = live.Width;
-                srcH = live.Height;
-            }
-            else
-            {
-                // Fallback: no live rect yet — use the editor's own MapPage size.
-                // Fractions will be wrong until the player views the real map once.
-                srcW = panelW;
-                srcH = panelH;
-                _monitor.Log(
-                    "[Editor] No live rect yet — open the game map once before editing " +
-                    "for correct alignment. Using panel bounds as fallback.",
-                    StardewModdingAPI.LogLevel.Warn);
-            }
-
-            // Letterbox srcW×srcH into panelW×panelH (uniform scale, centred).
-            float scaleX = (float)panelW / srcW;
-            float scaleY = (float)panelH / srcH;
-            float scale  = Math.Min(scaleX, scaleY);
-
-            int dw = (int)(srcW * scale);
-            int dh = (int)(srcH * scale);
-            int ox = _mapPanel.X + (panelW - dw) / 2;
-            int oy = _mapPanel.Y + (panelH - dh) / 2;
-
-            _mapArea = new Rectangle(ox, oy, dw, dh);
-
-            _monitor.Log(
-                $"[Editor] mapArea: x={ox} y={oy} w={dw} h={dh}  " +
-                $"scale={scale:F4}  src={srcW}×{srcH}  panel={panelW}×{panelH}",
-                StardewModdingAPI.LogLevel.Debug);
+            // _mapArea is set once in the constructor from the live GameMenu bounds.
+            // Tab switches don't change the map rect — nothing to do here.
+            // Kept as a hook in case future SDV versions need per-tab recalculation.
         }
 
         private void LayoutSidebar()
@@ -317,7 +323,7 @@ namespace ForageTrackerMod
             y += 24 + Pad;
 
             // Coord info space
-            //y += 44;
+            y += 44;
 
             // Bind to current map + Delete this map — side by side
             int half2         = (w - Pad) / 2;
@@ -346,35 +352,20 @@ namespace ForageTrackerMod
                 new Rectangle(0, 0, Game1.uiViewport.Width, Game1.uiViewport.Height),
                 Color.Black * 0.6f);
 
-            // ── Map panel background (drawn before tabs so active tab overlaps) ──
-            IClickableMenu.drawTextureBox(b, Game1.menuTexture,
-                new Rectangle(0, 256, 60, 60),
-                _mapPanel.X - 4, _mapPanel.Y - 4,
-                _mapPanel.Width + 8, _mapPanel.Height + 8,
-                Color.White, drawShadow: false);
-
-            // ── Map tabs (drawn after panel frame so active tab overlaps top) ──
+            // ── Draw map tabs FIRST (above the box, flush with map top) ─────────
             DrawMapTabs(b);
 
-            b.Draw(Game1.fadeToBlackRect, _mapPanel, Color.Black * 0.3f);
+            // ── Map box — sized exactly to _mapArea, no unused border space ───
+            // The box border wraps the map image tightly. Tabs sit just above it.
+            IClickableMenu.drawTextureBox(b, Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                _mapArea.X - 4, _mapArea.Y - 4,
+                _mapArea.Width + 8, _mapArea.Height + 8,
+                Color.White, drawShadow: false);
 
-            // Draw the map page clipped to _mapArea (the actual image rect) so game
-            // labels don't bleed outside the editor frame. Using _mapArea (not _mapPanel)
-            // ensures the clip boundary matches exactly where fractions are computed.
-            b.End();
-            var prevScissor    = b.GraphicsDevice.ScissorRectangle;
-            var prevRasterizer = b.GraphicsDevice.RasterizerState;
-            var clipState      = new RasterizerState { ScissorTestEnable = true };
-            b.GraphicsDevice.ScissorRectangle = _mapArea;
-            b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend,
-                SamplerState.PointClamp, null, clipState,
-                null, Matrix.Identity);
+            // ── Map image ─────────────────────────────────────────────────────
+            // _mapPage is sized to _mapArea exactly, so no erase strips needed.
             _mapPage?.draw(b);
-            b.End();
-            b.GraphicsDevice.ScissorRectangle = prevScissor;
-            b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend,
-                SamplerState.PointClamp, null, prevRasterizer,
-                null, Matrix.Identity);
 
             // ── Region overlays ───────────────────────────────────────────────
             int mx = Game1.getMouseX(), my = Game1.getMouseY();
@@ -639,9 +630,10 @@ namespace ForageTrackerMod
         {
             _tabRects.Clear();
 
-            int tabAreaW  = _mapPanel.Width - 150; // leave room for + New Map
-            int tabY      = Pad;
-            int x         = Pad;
+            // Tabs sit directly above _mapArea so they visually connect to the map box.
+            // _mapArea.Y - TabH - 2 puts them flush against the top border.
+            int tabY = _mapArea.Y - TabH - 2;
+            int x    = _mapArea.X;
 
             // Measure each tab width from its label
             const float scale = 0.68f;
@@ -689,9 +681,9 @@ namespace ForageTrackerMod
             }
 
             // "+ New Map" button — right-aligned in the tab bar
-            int newMapW     = 130;
-            int newMapX     = _mapPanel.Right - newMapW;
-            _btnNewMapRect  = new Rectangle(newMapX, tabY + 4, newMapW, TabH - 4);
+            int newMapW    = 130;
+            int newMapX    = _mapArea.Right - newMapW;
+            _btnNewMapRect = new Rectangle(newMapX, tabY + 4, newMapW, TabH - 4);
             DrawButton(b, _btnNewMapRect, "+ New Map", Color.White);
 
             // If the current map is not "Town", show a brief reference note on the map.
@@ -776,7 +768,8 @@ namespace ForageTrackerMod
 
         private void DrawNewMapDialog(SpriteBatch b)
         {
-            int dw = 360, dh = 160;
+            bool hasError = _newMapError.Length > 0;
+            int dw = 360, dh = hasError ? 195 : 160;
             int dx = (Game1.uiViewport.Width  - dw) / 2;
             int dy = (Game1.uiViewport.Height - dh) / 2;
 
@@ -791,8 +784,17 @@ namespace ForageTrackerMod
             var field = new Rectangle(dx + 16, dy + 52, dw - 32, 34);
             DrawTextField(b, field, _newMapName, true);
 
-            var ok     = new Rectangle(dx + 16,      dy + dh - 52, (dw - 48) / 2, 36);
-            var cancel = new Rectangle(ok.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
+            // Error message (duplicate name)
+            if (hasError)
+            {
+                b.DrawString(Game1.smallFont, _newMapError,
+                    new Vector2(dx + 16, dy + 94),
+                    new Color(220, 80, 80),
+                    0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
+            }
+
+            var ok     = new Rectangle(dx + 16,       dy + dh - 52, (dw - 48) / 2, 36);
+            var cancel = new Rectangle(ok.Right + 16,  dy + dh - 52, (dw - 48) / 2, 36);
 
             DrawButton(b, ok,     "✓ Create", new Color(140, 220, 140));
             DrawButton(b, cancel, "✕ Cancel", new Color(220, 120, 120));
@@ -805,14 +807,21 @@ namespace ForageTrackerMod
             // ── New-map dialog takes priority ─────────────────────────────────
             if (_newMapDialogOpen)
             {
-                int dw = 360, dh = 160;
+                bool hasError = _newMapError.Length > 0;
+                int dw = 360, dh = hasError ? 195 : 160;
                 int dx = (Game1.uiViewport.Width  - dw) / 2;
                 int dy = (Game1.uiViewport.Height - dh) / 2;
-                var ok     = new Rectangle(dx + 16,      dy + dh - 52, (dw - 48) / 2, 36);
-                var cancel = new Rectangle(ok.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
+                var ok     = new Rectangle(dx + 16,       dy + dh - 52, (dw - 48) / 2, 36);
+                var cancel = new Rectangle(ok.Right + 16,  dy + dh - 52, (dw - 48) / 2, 36);
 
-                if (ok.Contains(x, y)     && _newMapName.Trim().Length > 0) ConfirmNewMap();
-                else if (cancel.Contains(x, y)) { _newMapDialogOpen = false; _newMapName = ""; }
+                if (ok.Contains(x, y) && _newMapName.Trim().Length > 0)
+                    ConfirmNewMap();
+                else if (cancel.Contains(x, y))
+                {
+                    _newMapDialogOpen = false;
+                    _newMapName       = "";
+                    _newMapError      = "";
+                }
                 return;
             }
 
@@ -981,7 +990,6 @@ namespace ForageTrackerMod
         public override void releaseLeftClick(int x, int y)
         {
             _dragging = false;
-            _draggingOpacity = false;
             _handle   = Handle.None;
         }
 
@@ -993,7 +1001,7 @@ namespace ForageTrackerMod
                 return;
             }
             if (!_dragging || _sel < 0) return;
-            
+
             var r    = _currentRegions[_sel];
             float dx = (x - _dragAnchor.X) / (float)_mapArea.Width;
             float dy = (y - _dragAnchor.Y) / (float)_mapArea.Height;
@@ -1055,7 +1063,7 @@ namespace ForageTrackerMod
             if (key == Keys.Escape)
             {
                 if (_dropdownOpen)      { _dropdownOpen = false; return; }
-                if (_newMapDialogOpen)  { _newMapDialogOpen = false; _newMapName = ""; return; }
+                if (_newMapDialogOpen)  { _newMapDialogOpen = false; _newMapName = ""; _newMapError = ""; return; }
                 exitThisMenu();
                 return;
             }
@@ -1063,9 +1071,12 @@ namespace ForageTrackerMod
             if (key == Keys.Back)
             {
                 if (_newMapDialogOpen && _newMapName.Length > 0)
-                    _newMapName = _newMapName[..^1];
+                {
+                    _newMapName  = _newMapName[..^1];
+                    _newMapError = "";
+                }
                 else if (_nameFocused && _fieldName.Length > 0)
-                    _fieldName  = _fieldName[..^1];
+                    _fieldName = _fieldName[..^1];
                 return;
             }
 
@@ -1082,22 +1093,27 @@ namespace ForageTrackerMod
 
         // ── Operations ────────────────────────────────────────────────────────
 
+        // Error message shown when the player tries to create a duplicate map name.
+        private string _newMapError = "";
+
         private void ConfirmNewMap()
         {
             string key = _newMapName.Trim();
             if (key.Length == 0) return;
 
-            if (!_editMaps.ContainsKey(key))
+            // Reject duplicate names — tell the player clearly.
+            if (_editMaps.ContainsKey(key))
             {
-                _editMaps[key] = new List<MapRegionData>();
-                _mapKeys.Add(key);
-                _mapKeys.Sort();
-            }
-            else { 
-            
+                _newMapError = $"A map named \"{key}\" already exists.";
+                return;
             }
 
-            _currentMapKey = key;
+            _newMapError      = "";
+            _editMaps[key]    = new List<MapRegionData>();
+            _mapKeys.Add(key);
+            _mapKeys.Sort();
+
+            _currentMapKey    = key;
             _newMapDialogOpen = false;
             _newMapName       = "";
             _sel              = -1;
@@ -1180,9 +1196,10 @@ namespace ForageTrackerMod
         private void DoSave()
         {
             CommitName();
-            // Write working copies back to cfg
-            foreach (var kv in _editMaps)
-                _cfg.RegionsByMap[kv.Key] = kv.Value.Select(CloneRegion).ToList();
+            // Replace RegionsByMap entirely from _editMaps so deleted tabs are removed.
+            _cfg.RegionsByMap = _editMaps.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.Select(CloneRegion).ToList());
             // Persist bindings
             _cfg.Bindings = new Dictionary<string, string>(_bindings);
             _onSave(_cfg);

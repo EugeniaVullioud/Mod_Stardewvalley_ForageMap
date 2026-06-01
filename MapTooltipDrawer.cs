@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using System.Reflection;
 
 namespace ForageTrackerMod
 {
@@ -40,7 +41,7 @@ namespace ForageTrackerMod
         /// so both sides always use the exact same coordinate space.
         /// Null until the map has been opened at least once this session.
         /// </summary>
-        public static Rectangle? LastLiveMapRect { get; private set; }
+        public static Rectangle? LastLiveMapRect { get; set; }
 
         // ─────────────────────────────────────────────────────────────────────
         // DEBUG — set DebugMode = true to draw region overlays and the mouse
@@ -98,23 +99,180 @@ namespace ForageTrackerMod
             if (gameMenu.GetCurrentPage() is not MapPage mapPage)
                 return;
 
-            // ── Compute the map image rect ────────────────────────────────────
-            // This is the ONLY place we call TryGetMapRenderData for the live
-            // game map. Both the tooltip hit-test and the debug overlay use this
-            // same rect, so they are always in sync.
             if (!MapRenderUtility.TryGetMapRenderData(mapPage, out var rd))
-            {
-                Monitor?.Log("[Tooltip] TryGetMapRenderData failed.", LogLevel.Warn);
                 return;
-            }
 
             Rectangle mapImageRect = rd.DestinationRect;
+            //works
+            Rectangle actualRect =
+                MapRenderUtility.ComputeActualMapRect(mapPage);
+
+            DrawDebugBorder(
+                b,
+                actualRect,
+                Color.LimeGreen,
+                4);
+
+            //end works
+            foreach (var a in typeof(MapPage).GetFields(
+    BindingFlags.Instance |
+    BindingFlags.NonPublic |
+    BindingFlags.Public))
+            {
+                if (a.FieldType == typeof(Rectangle))
+                {
+                    var r = (Rectangle)a.GetValue(mapPage)!;
+
+                    Monitor.Log(
+                        $"RECT FIELD {a.Name} = X:{r.X} Y:{r.Y} W:{r.Width} H:{r.Height}",
+                        LogLevel.Warn);
+                }
+            }
+
+            foreach (var prop in typeof(MapPage).GetProperties(
+    BindingFlags.Instance |
+    BindingFlags.NonPublic |
+    BindingFlags.Public))
+            {
+                if (prop.PropertyType == typeof(Rectangle))
+                {
+                    try
+                    {
+                        var r = (Rectangle)prop.GetValue(mapPage)!;
+
+                        Monitor.Log(
+                            $"RECT PROP {prop.Name} = X:{r.X} Y:{r.Y} W:{r.Width} H:{r.Height}",
+                            LogLevel.Warn);
+                    }
+                    catch { }
+                }
+            }
+            Monitor?.Log(
+    $"GameMenu: x={gameMenu.xPositionOnScreen} " +
+    $"y={gameMenu.yPositionOnScreen} " +
+    $"w={gameMenu.width} " +
+    $"h={gameMenu.height}",
+    LogLevel.Warn);
+            foreach (var f in typeof(MapPage)
+    .GetFields(BindingFlags.Instance |
+               BindingFlags.NonPublic |
+               BindingFlags.Public))
+            {
+                try
+                {
+                    object? vv = f.GetValue(mapPage);
+
+                    Monitor?.Log(
+                        $"{f.FieldType.Name} {f.Name} = {vv}",
+                        LogLevel.Debug);
+                }
+                catch
+                {
+                }
+            }
+            foreach (var p in typeof(MapPage)
+    .GetProperties(BindingFlags.Instance |
+                   BindingFlags.NonPublic |
+                   BindingFlags.Public))
+            {
+                try
+                {
+                    object? v = p.GetValue(mapPage);
+
+                    Monitor?.Log(
+                        $"PROP {p.PropertyType.Name} {p.Name} = {v}",
+                        LogLevel.Debug);
+                }
+                catch
+                {
+                }
+            }
+            Monitor.Log(
+    $"UIScale={Game1.options.uiScale}",
+    LogLevel.Debug);
+
+            var field = typeof(MapPage).GetField(
+    "mapPosition",
+    BindingFlags.Instance | BindingFlags.NonPublic);
+
+            var value = field?.GetValue(mapPage);
+
+            if (value != null)
+            {
+                foreach (var f in value.GetType().GetFields(
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic))
+                {
+                    Monitor.Log(
+                        $"mapPosition.{f.Name} = {f.GetValue(value)}",
+                        LogLevel.Warn);
+                }
+            }
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            foreach (var ff in typeof(MapPage).GetFields(flags))
+            {
+                try
+                {
+                    if (ff.FieldType == typeof(Rectangle))
+                    {
+                        var vvv = (Rectangle)ff.GetValue(mapPage)!;
+
+                        Monitor?.Log(
+                            $"RECT FIELD {ff.Name} = " +
+                            $"X:{vvv.X} Y:{vvv.Y} W:{vvv.Width} H:{vvv.Height}",
+                            LogLevel.Warn);
+                    }
+                }
+                catch { }
+            }
+            DrawMarker(
+b,
+gameMenu.xPositionOnScreen,
+gameMenu.yPositionOnScreen,
+Color.Blue);
+            DrawMarker(
+    b,
+    gameMenu.xPositionOnScreen + mapPage.xPositionOnScreen,
+    gameMenu.yPositionOnScreen + mapPage.yPositionOnScreen,
+    Color.Lime);
+            // ── Compute the map image rect ────────────────────────────────────
+            //
+            // In SDV 1.6, MapPage stretches the world map to fill its entire
+            // bounds with no letterboxing. The page bounds are (e.g.) 890×680,
+            // which is NOT the native 1360×720 aspect ratio.
+            //
+            // The editor computes region fractions by letterboxing 1360×720 into
+            // its panel space. To keep fractions consistent we must do the same
+            // here: derive a rect with the native 1360:720 aspect ratio fitted
+            // inside the MapPage bounds, centred.
+            //
+            // This is the SAME calculation the editor uses, applied to the live
+            // MapPage bounds instead of the editor panel — so both sides evaluate
+            // fractions against the same relative coordinate space.
+            const int NativeMapW = 1360;
+            const int NativeMapH = 720;
+
+            int pageW = mapPage.width;
+            int pageH = mapPage.height;
+            if (pageW <= 0 || pageH <= 0) return;
+
+            float scaleX = (float)pageW / NativeMapW;
+            float scaleY = (float)pageH / NativeMapH;
+            float fitScale = Math.Min(scaleX, scaleY);
+
+            int fitW = (int)(NativeMapW * fitScale);
+            int fitH = (int)(NativeMapH * fitScale);
+            int fitX = mapPage.xPositionOnScreen + (pageW - fitW) / 2;
+            int fitY = mapPage.yPositionOnScreen + (pageH - fitH) / 2;
+
             LastLiveMapRect = mapImageRect;
 
             // ── Debug overlay — draws BEFORE tooltip so tooltip is on top ─────
             // BEGIN DEBUG BLOCK — remove or set DebugMode = false to disable
-            if (DebugMode)
-                DrawDebugOverlay(b, mapPage, mapImageRect);
+            if (DebugMode)  DrawDebugOverlay(b, mapPage, mapImageRect);
+      
             // END DEBUG BLOCK
 
             try
@@ -152,6 +310,24 @@ namespace ForageTrackerMod
         // =========================================================================
         // DEBUG OVERLAY
         // Remove this entire method (and its call above) before shipping.
+        /// <summary>
+        /// Given a live SDV map key ("Town", "Island", etc.), returns the editor
+        /// tab key whose regions should be used — by looking up which tab is bound
+        /// to that live key.  Falls back to the live key itself if nothing is bound.
+        /// </summary>
+        private static string ResolveEditorKey(string liveMapKey)
+        {
+            foreach (var kv in s_bindings)
+                if (kv.Value == liveMapKey) return kv.Key;
+            return liveMapKey;
+        }
+
+        static void DrawMarker(SpriteBatch b, int x, int y, Color c)
+        {
+            b.Draw(Game1.fadeToBlackRect,
+                new Rectangle(x - 5, y - 5, 10, 10),
+                c);
+        }
         // =========================================================================
 
         /// <summary>
@@ -166,11 +342,8 @@ namespace ForageTrackerMod
         /// </summary>
         private static void DrawDebugOverlay(SpriteBatch b, MapPage mapPage, Rectangle mapImageRect)
         {
+            // Current computed rect
             DrawDebugBorder(b, mapImageRect, Color.Red,4);
-
-            var pageRect = new Rectangle( mapPage.xPositionOnScreen, mapPage.yPositionOnScreen, mapPage.width, mapPage.height);
-
-            DrawDebugBorder(b, pageRect, Color.Blue, 2);
 
             string liveKey   = MapKeyHelper.GetMapKey(mapPage);
             string editorKey = ResolveEditorKey(liveKey);
@@ -181,7 +354,7 @@ namespace ForageTrackerMod
             float relY = (mouseY - mapImageRect.Y) / (float)mapImageRect.Height;
 
             // Draw each region as a coloured rectangle
-            if (s_regionsByMap.TryGetValue(mapKey, out var regions))
+            if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
                 foreach (var region in regions)
                 {
@@ -209,7 +382,7 @@ namespace ForageTrackerMod
 
             // Draw fractional mouse position in the top-left corner of the map
             string debugText =
-                $"DEBUG MAP: key={mapKey}\n" +
+                $"DEBUG MAP: live={liveKey}  editor={editorKey}\n" +
                 $"mapRect: x={mapImageRect.X} y={mapImageRect.Y} " +
                 $"w={mapImageRect.Width} h={mapImageRect.Height}\n" +
                 $"mouse: screen=({mouseX},{mouseY})  frac=({relX:F3},{relY:F3})";
@@ -275,14 +448,7 @@ namespace ForageTrackerMod
                 return null;
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-
-            // Resolve which editor tab's regions to use via bindings.
-            string? editorKey = null;
-            foreach (var kv in s_bindings)
-            {
-                if (kv.Value == liveMapKey) { editorKey = kv.Key; break; }
-            }
-            editorKey ??= liveMapKey;
+            string editorKey  = ResolveEditorKey(liveMapKey);
 
             if (!s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
@@ -319,22 +485,7 @@ namespace ForageTrackerMod
             var result = new List<string>(8);
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-
-            // Find the editor tab that is bound to this live map key.
-            // If multiple tabs share the same binding, prefer an exact name match,
-            // then fall back to the first match found.
-            string? editorKey = null;
-            foreach (var kv in s_bindings)
-            {
-                if (kv.Value == liveMapKey)
-                {
-                    editorKey = kv.Key;
-                    break;
-                }
-            }
-
-            // Fall back to using the live key directly as the editor key (legacy / default).
-            editorKey ??= liveMapKey;
+            string editorKey  = ResolveEditorKey(liveMapKey);
 
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {

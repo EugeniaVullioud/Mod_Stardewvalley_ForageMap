@@ -36,31 +36,22 @@ public sealed class MapRegionData
     /// <summary>Helper — converts the packed color to XNA Color.</summary>
     public Color Color
     {
-        /*
+
         get => new Color(
             (byte)((ColorPacked >> 16) & 0xFF),
-            (byte)((ColorPacked >>  8) & 0xFF),
-            (byte)( ColorPacked        & 0xFF),
+            (byte)((ColorPacked >> 8) & 0xFF),
+            (byte)(ColorPacked & 0xFF),
             (byte)((ColorPacked >> 24) & 0xFF));
         set => ColorPacked =
             ((uint)value.A << 24) |
             ((uint)value.R << 16) |
-            ((uint)value.G <<  8) |
+            ((uint)value.G << 8) |
              (uint)value.B;
-        */
-        get => new Color(
-       (byte)((ColorPacked >> 16) & 0xFF),
-       (byte)((ColorPacked >> 8) & 0xFF),
-       (byte)(ColorPacked & 0xFF),
-       Opacity);
-
-        set
-        {
-            ColorPacked =
-                ((uint)value.R << 16) |
-                ((uint)value.G << 8) |
-                 (uint)value.B;
-        }
     }
+
+    /// <summary>
+    /// Opacity (0–255) — stored as the alpha byte of ColorPacked.
+    /// Getting or setting this is identical to reading/writing Color.A.
+    /// Exists as a named property so the editor slider can reference it clearly.
     public byte Opacity { get; set; } = 160;
 }
