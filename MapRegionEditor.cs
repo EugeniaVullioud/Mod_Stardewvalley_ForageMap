@@ -46,7 +46,6 @@ namespace ForageTrackerMod
         private const int Pad       = 12;
         private const int BtnH      = 40;
         private const int TabH      = 44;   // taller tabs so text is comfortable
-        private const int EdgeGrab  = 10;
         private const float MinFrac = 0.02f;
 
         private static readonly Color[] Palette =
@@ -72,6 +71,7 @@ namespace ForageTrackerMod
         private readonly IMonitor                _monitor;
         private readonly MapRegionConfig         _cfg;
         private readonly Action<MapRegionConfig> _onSave;
+        private int _edgeGrab;
 
         // All maps being edited — copied from cfg so changes are only committed on Save
         private readonly Dictionary<string, List<MapRegionData>> _editMaps;
@@ -107,6 +107,10 @@ namespace ForageTrackerMod
         // Selection & drag
         private int    _sel      = -1;
         private bool   _dragging = false;
+
+        private Rectangle _edgeGrabSliderRect;
+        private bool _draggingEdgeGrab;
+
         private enum Handle { None, Move, Left, Right, Top, Bottom }
         private Handle _handle   = Handle.None;
         private Point  _dragAnchor;
@@ -152,6 +156,8 @@ namespace ForageTrackerMod
             _monitor = monitor;
             _cfg     = cfg;
             _onSave  = onSave;
+
+            _edgeGrab = Math.Max(2, cfg.EdgeGrabPixels);
 
             // Deep-copy all maps so edits don't affect live data until Save
             _editMaps = cfg.RegionsByMap.ToDictionary(
@@ -307,9 +313,9 @@ namespace ForageTrackerMod
             y += locListH + Pad;
 
             // Color
-           // _btnColorRect = new Rectangle(x, y, w, BtnH);
+            // _btnColorRect = new Rectangle(x, y, w, BtnH);
             //y += BtnH + Pad * 2;
-            
+
             // Opacity
             _btnColorRect = new Rectangle(x, y, w, BtnH);
             y += BtnH + Pad;
@@ -320,6 +326,9 @@ namespace ForageTrackerMod
             w,
             24);
 
+            y += 24 + Pad;
+
+            _edgeGrabSliderRect = new Rectangle(x, y, w, 24);
             y += 24 + Pad;
 
             // Coord info space
@@ -384,7 +393,56 @@ namespace ForageTrackerMod
                         new Vector2(sr.X + 4, sr.Y + 4),
                         Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
-                if (isSel) DrawHandles(b, sr);
+                if (isSel)
+                {
+                    DrawHandles(b, sr);
+
+                    // Visualize grab zones
+                    // Opacity-based visibility
+                    byte alpha = (byte)Math.Min(255, _currentRegions[_sel].Opacity *1.15f); // +15%
+                    Color dragZone = _currentRegions[_sel].Color;
+                    dragZone.A = alpha;
+
+                    // LEFT
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        new Rectangle(
+                            sr.Left,
+                            sr.Top,
+                            _edgeGrab,
+                            sr.Height),
+                        dragZone);
+
+                    // RIGHT
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        new Rectangle(
+                            sr.Right - _edgeGrab,
+                            sr.Top,
+                            _edgeGrab,
+                            sr.Height),
+                        dragZone);
+
+                    // TOP
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        new Rectangle(
+                            sr.Left,
+                            sr.Top,
+                            sr.Width,
+                            _edgeGrab),
+                        dragZone);
+
+                    // BOTTOM
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        new Rectangle(
+                            sr.Left,
+                            sr.Bottom - _edgeGrab,
+                            sr.Width,
+                            _edgeGrab),
+                        dragZone);
+                }
             }
 
             // ── Debug overlay — draws fraction grid and mouse position ────────
@@ -556,6 +614,20 @@ namespace ForageTrackerMod
                 int thumbX =  _opacitySliderRect.X + (int)(_opacitySliderRect.Width * pct);
 
                 b.Draw( Game1.fadeToBlackRect, new Rectangle( thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
+
+                // Drag border
+                b.DrawString(Game1.smallFont, $"Border Sensitivity: {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+
+                b.Draw(Game1.fadeToBlackRect,  _edgeGrabSliderRect, Color.Black * 0.6f);
+                
+                float pctBorder = (_edgeGrab - 2) / 38f;
+
+                int thumbXBorder =  _edgeGrabSliderRect.X + (int)(_edgeGrabSliderRect.Width * pctBorder);
+
+                int thumbWidth = _edgeGrab;
+                thumbWidth = Math.Clamp(thumbWidth, 6, 30);
+
+                b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXBorder - 4, _edgeGrabSliderRect.Y - 2, 8, _edgeGrabSliderRect.Height + 4),  Color.White);
 
                 // Coords
                 int coordY = _btnColorRect.Bottom + 6;
@@ -875,6 +947,12 @@ namespace ForageTrackerMod
                 UpdateOpacityFromMouse(x);
                 return;
             }
+            if (_edgeGrabSliderRect.Contains(x, y))
+            {
+                _draggingEdgeGrab = true;
+                UpdateEdgeGrabFromMouse(x);
+                return;
+            }
             // Bind button — bind/rebind this map tab to the current live map key,
             // removing any previous tab that was bound to the same live key (exclusive).
             if (_btnBindRect.Contains(x, y))
@@ -971,7 +1049,7 @@ namespace ForageTrackerMod
                     CommitName();
                     SelectRegion(hit);
                     var sr      = ToScreen(_currentRegions[hit]);
-                    _handle     = GetHandle(sr, x, y);
+                    _handle     = GetHandle(sr, x, y, _edgeGrab);
                     _dragging   = true;
                     _dragAnchor = new Point(x, y);
                     _origL = _currentRegions[hit].Left;
@@ -990,7 +1068,9 @@ namespace ForageTrackerMod
         public override void releaseLeftClick(int x, int y)
         {
             _dragging = false;
-            _handle   = Handle.None;
+            _draggingEdgeGrab = false;
+            _draggingOpacity = false;
+            _handle = Handle.None;
         }
 
         public override void leftClickHeld(int x, int y)
@@ -998,6 +1078,12 @@ namespace ForageTrackerMod
             if (_draggingOpacity)
             {
                 UpdateOpacityFromMouse(x);
+                return;
+            }
+
+            if (_draggingEdgeGrab)
+            {
+                UpdateEdgeGrabFromMouse(x);
                 return;
             }
             if (!_dragging || _sel < 0) return;
@@ -1180,6 +1266,14 @@ namespace ForageTrackerMod
 
             r.Color = next;
         }
+        private void UpdateEdgeGrabFromMouse(int mouseX)
+        {
+            float pct = (mouseX - _edgeGrabSliderRect.X) / (float)_edgeGrabSliderRect.Width;
+
+            pct = Math.Clamp(pct, 0f, 1f);
+
+            _edgeGrab = (int)Math.Round( MathHelper.Lerp(2, 40, pct));
+        }
         private void UpdateOpacityFromMouse(int mouseX)
         {
             if (_sel < 0)
@@ -1217,12 +1311,12 @@ namespace ForageTrackerMod
             return -1;
         }
 
-        private static Handle GetHandle(Rectangle sr, int x, int y)
+        private static Handle GetHandle(Rectangle sr, int x, int y, int edge)
         {
-            if (Math.Abs(x - sr.Left)   <= EdgeGrab) return Handle.Left;
-            if (Math.Abs(x - sr.Right)  <= EdgeGrab) return Handle.Right;
-            if (Math.Abs(y - sr.Top)    <= EdgeGrab) return Handle.Top;
-            if (Math.Abs(y - sr.Bottom) <= EdgeGrab) return Handle.Bottom;
+            if (Math.Abs(x - sr.Left) <= edge) return Handle.Left;
+            if (Math.Abs(x - sr.Right) <= edge) return Handle.Right;
+            if (Math.Abs(y - sr.Top) <= edge) return Handle.Top;
+            if (Math.Abs(y - sr.Bottom) <= edge) return Handle.Bottom;
             return Handle.Move;
         }
 
