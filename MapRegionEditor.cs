@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using static StardewValley.Menus.CoopMenu;
 
 namespace ForageTrackerMod
 {
@@ -61,6 +62,16 @@ namespace ForageTrackerMod
             new(255, 180, 200),
         };
         private bool _draggingOpacity;
+
+        // Tab navigation
+        private Rectangle _btnTabLeftRect;
+        private Rectangle _btnTabRightRect;
+
+        // First tab currently visible in the viewport.
+        private int _firstVisibleTab = 0;
+
+        // Width reserved for navigation buttons
+        private const int TabArrowW = 40;
 
         // All known SDV location names — shown in the dropdown.
         // Populated once in constructor from hardcoded list + runtime tracker data.
@@ -130,6 +141,7 @@ namespace ForageTrackerMod
         // New-map dialog
         private bool   _newMapDialogOpen = false;
         private string _newMapName       = "";
+        private const int newMapW = 130;
 
         // Map binding: mapKey → SDV map-key string (e.g. "Town", "Island").
         // A map tab that has no binding is shown with an ⚠ warning.
@@ -171,7 +183,7 @@ namespace ForageTrackerMod
 
             _mapKeys       = _editMaps.Keys.OrderBy(k => k).ToList();
             _currentMapKey = _mapKeys[0];
-
+            EnsureSelectedTabVisible();
             // Load bindings (mapKey → SDV map key string)
             _bindings = cfg.Bindings != null
                 ? new Dictionary<string, string>(cfg.Bindings)
@@ -619,7 +631,7 @@ namespace ForageTrackerMod
                 b.Draw( Game1.fadeToBlackRect, new Rectangle( thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
 
                 // Drag border
-                b.DrawString(Game1.smallFont, $"Border Sensitivity: {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                b.DrawString(Game1.smallFont, $"Border Tolerance: {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
 
                 b.Draw(Game1.fadeToBlackRect,  _edgeGrabSliderRect, Color.Black * 0.6f);
                 
@@ -700,80 +712,147 @@ namespace ForageTrackerMod
         {
             _tabRects.Clear();
 
-            // Tabs sit directly above _mapArea so they visually connect to the map box.
-            // _mapArea.Y - TabH - 2 puts them flush against the top border.
-            int tabY = _mapArea.Y - TabH - TabMapGap;
-            int x    = _mapArea.X;
+            //EnsureSelectedTabVisible();
 
-            // Measure each tab width from its label
+            int tabY =
+                _mapArea.Y - TabH - TabMapGap;
+
+            bool hiddenLeft =
+                _firstVisibleTab > 0;
+
+            int lastVisible =
+                GetLastVisibleTab();
+
+            bool hiddenRight =
+                lastVisible < _mapKeys.Count - 1;
+
+       
+            const int newMapWw = 130;
+
+            int tabsStartX = _mapArea.X + TabArrowW + 6;
+
+            int tabsEndX =
+                _mapArea.Right
+                - newMapWw
+                - TabArrowW
+                - 6;
+
+            int x = tabsStartX;
+
+            _btnTabLeftRect = new Rectangle(
+              _mapArea.X,
+              tabY,
+              TabArrowW,
+              TabH);
+
+            _btnTabRightRect = new Rectangle( _mapArea.Right - newMapWw - TabArrowW - 4,  tabY, TabArrowW,  TabH);
+
+            if (hiddenLeft)
+                DrawButton(b, _btnTabLeftRect, "<", Color.White);
+
+            if (hiddenRight)
+                DrawButton(b, _btnTabRightRect, ">", Color.White);
+
+
             const float scale = 0.68f;
-            int tabPadX = 18; // horizontal padding inside each tab
+            const int tabPadX = 18;
 
-            for (int i = 0; i < _mapKeys.Count; i++)
+            for (int i = _firstVisibleTab; i <= lastVisible; i++)
             {
-                string key    = _mapKeys[i];
-                bool   active = key == _currentMapKey;
+                string key = _mapKeys[i];
 
-                // Compute label: key name + region count in parens
-                int regionCount = _editMaps[key].Count;
-                string label = $"  {key}  ({regionCount})";
+                bool active =
+                    key == _currentMapKey;
 
-                int tw = (int)(Game1.smallFont.MeasureString(label).X * scale) + tabPadX * 2;
-                tw = Math.Max(tw, 80);  // minimum tab width
+                int regionCount =
+                    _editMaps[key].Count;
 
-                var tabRect = new Rectangle(x, tabY, tw, TabH);
+                string label =
+                    $"  {key}  ({regionCount})";
+
+                int tw =
+                    GetTabWidth(key);
+
+                Rectangle tabRect =
+                    new Rectangle(
+                        x,
+                        tabY,
+                        tw,
+                        TabH);
+
                 _tabRects.Add(tabRect);
 
-                // Active tab: bright background, no bottom line (connects to panel)
-                // Inactive tab: dimmer, has a bottom border, slightly shorter
-                Color bgColor   = active ? new Color(230, 210, 170) : new Color(140, 120, 90);
-                Color textColor = active ? Game1.textColor : Color.White * 0.75f;
-                int   drawY     = active ? tabY : tabY + 4; // inactive sits 4px lower
-                int   drawH     = active ? TabH + 2 : TabH - 4; // active overlaps panel top by 2px
+                Color bgColor =
+                    active
+                    ? new Color(230, 210, 170)
+                    : new Color(140, 120, 90);
 
-                var drawRect = new Rectangle(x, drawY, tw, drawH);
+                Color textColor =
+                    active
+                    ? Game1.textColor
+                    : Color.White * 0.75f;
 
-                // Tab background
-                IClickableMenu.drawTextureBox(b, Game1.menuTexture,
+                int drawY =
+                    active
+                    ? tabY
+                    : tabY + 4;
+
+                int drawH =
+                    active
+                    ? TabH + 2
+                    : TabH - 4;
+
+                Rectangle drawRect =
+                    new Rectangle(
+                        x,
+                        drawY,
+                        tw,
+                        drawH);
+
+                IClickableMenu.drawTextureBox(
+                    b,
+                    Game1.menuTexture,
                     new Rectangle(0, 256, 60, 60),
-                    drawRect.X, drawRect.Y, drawRect.Width, drawRect.Height,
-                    bgColor, drawShadow: !active);
+                    drawRect.X,
+                    drawRect.Y,
+                    drawRect.Width,
+                    drawRect.Height,
+                    bgColor,
+                    drawShadow: !active);
 
-                // Tab label
-                var labelSize = Game1.smallFont.MeasureString(label) * scale;
-                var labelPos  = new Vector2(
-                    x + (tw - labelSize.X) / 2f,
-                    drawY + (TabH - labelSize.Y) / 2f);
-                b.DrawString(Game1.smallFont, label, labelPos,
-                    textColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                Vector2 labelSize =
+                    Game1.smallFont.MeasureString(label) * scale;
 
-                x += tw + 2; // 2px gap between tabs
+                Vector2 labelPos =
+                    new Vector2(
+                        x + (tw - labelSize.X) / 2f,
+                        drawY + (TabH - labelSize.Y) / 2f);
+
+                b.DrawString(
+                    Game1.smallFont,
+                    label,
+                    labelPos,
+                    textColor,
+                    0f,
+                    Vector2.Zero,
+                    scale,
+                    SpriteEffects.None,
+                    1f);
+
+                x += tw + 2;
             }
 
-            // "+ New Map" button — right-aligned in the tab bar
-            int newMapW    = 130;
-            int newMapX    = _mapArea.Right - newMapW;
-            _btnNewMapRect = new Rectangle(newMapX, tabY + 4, newMapW, TabH - 4);
-            DrawButton(b, _btnNewMapRect, "+ New Map", Color.White);
+            _btnNewMapRect = new Rectangle(
+                _mapArea.Right - newMapWw,
+                tabY + 4,
+                newMapWw,
+                TabH - 4);
 
-            // If the current map is not "Town", show a brief reference note on the map.
-            // The detailed binding status is shown in the sidebar instead.
-            if (_currentMapKey != "Town" && _bindings.ContainsKey(_currentMapKey))
-            {
-                string notice = $"Editing: \"{_currentMapKey}\"  |  World map shown for reference.";
-                var noticeSz  = Game1.smallFont.MeasureString(notice) * 0.6f;
-                float nx = _mapArea.X + (_mapArea.Width - noticeSz.X) / 2f;
-                float ny = _mapArea.Bottom - noticeSz.Y - 10;
-
-                b.Draw(Game1.fadeToBlackRect,
-                    new Rectangle((int)nx - 8, (int)ny - 4,
-                                  (int)noticeSz.X + 16, (int)noticeSz.Y + 8),
-                    Color.Black * 0.65f);
-
-                b.DrawString(Game1.smallFont, notice,
-                    new Vector2(nx, ny), Color.Yellow * 0.95f,
-                    0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
-            }
+            DrawButton(
+                b,
+                _btnNewMapRect,
+                "+ New Map",
+                Color.White);
         }
 
         // ── Dropdown drawing ──────────────────────────────────────────────────
@@ -915,21 +994,57 @@ namespace ForageTrackerMod
                 _dropdownOpen = false;
                 return;
             }
-
-            // ── Map tabs ──────────────────────────────────────────────────────
-            for (int i = 0; i < _tabRects.Count && i < _mapKeys.Count; i++)
+            if (_btnTabLeftRect.Contains(x, y))
             {
-                if (_tabRects[i].Contains(x, y))
+                if (_firstVisibleTab > 0)
                 {
-                    if (_mapKeys[i] != _currentMapKey)
+                    _firstVisibleTab--;
+                    Game1.playSound("shwip");
+                }
+
+                return;
+            }
+
+            if (_btnTabRightRect.Contains(x, y))
+            {
+                if (GetLastVisibleTab() < _mapKeys.Count - 1)
+                {
+                    _firstVisibleTab++;
+                    Game1.playSound("shwip");
+                }
+
+                return;
+            }
+            // ── Map tabs ──────────────────────────────────────────────────────
+            int visibleIndex = 0;
+
+            for (int mapIndex = _firstVisibleTab;
+                 mapIndex <= GetLastVisibleTab();
+                 mapIndex++)
+            {
+                if (visibleIndex >= _tabRects.Count)
+                    break;
+
+                if (_tabRects[visibleIndex].Contains(x, y))
+                {
+                    if (_mapKeys[mapIndex] != _currentMapKey)
                     {
                         CommitName();
+
                         _sel = -1;
-                        _currentMapKey = _mapKeys[i];
+
+                        _currentMapKey =
+                            _mapKeys[mapIndex];
+
+                        EnsureSelectedTabVisible();
+
                         Game1.playSound("smallSelect");
                     }
+
                     return;
                 }
+
+                visibleIndex++;
             }
             if (_btnNewMapRect.Contains(x, y)) { _newMapDialogOpen = true; return; }
 
@@ -983,6 +1098,7 @@ namespace ForageTrackerMod
                 _sel           = -1;
                 _fieldName     = "";
                 Game1.playSound("trashcan");
+                EnsureSelectedTabVisible();
                 return;
             }
 
@@ -1201,8 +1317,85 @@ namespace ForageTrackerMod
             _newMapDialogOpen = false;
             _newMapName       = "";
             _sel              = -1;
-        }
 
+            /*
+            int idx = _mapKeys.IndexOf(key);
+
+            if (idx >= 0)
+                _firstVisibleTab = idx;
+            EnsureSelectedTabVisible();*/
+        }
+        private int GetTabWidth(string mapKey)
+        {
+            const float scale = 0.68f;
+            const int tabPadX = 18;
+
+            int regionCount = _editMaps[mapKey].Count;
+
+            string label =
+                $"  {mapKey}  ({regionCount})";
+
+            int width =
+                (int)(Game1.smallFont.MeasureString(label).X * scale)
+                + tabPadX * 2;
+
+            return Math.Max(width, 80);
+        }
+        private int GetLastVisibleTab()
+        {
+            int availableStart =  _mapArea.X + TabArrowW + 8;
+
+            int availableEnd =
+                _mapArea.Right
+                - newMapW       // reserve New Map button
+                - TabArrowW     // reserve right arrow
+                - 8;
+
+            int availableWidth =
+                Math.Max(0, availableEnd - availableStart);
+
+            int usedWidth = 0;
+            int last = _firstVisibleTab - 1;
+
+            for (int i = _firstVisibleTab; i < _mapKeys.Count; i++)
+            {
+                int tabWidth = GetTabWidth(_mapKeys[i]);
+
+                if (usedWidth + tabWidth > availableWidth)
+                    break;
+
+                usedWidth += tabWidth + 2;
+                last = i;
+            }
+
+            return Math.Max(last, _firstVisibleTab);
+        }
+        private void EnsureSelectedTabVisible()
+        {
+            int selectedIndex =
+         _mapKeys.IndexOf(_currentMapKey);
+
+            if (selectedIndex < 0)
+                return;
+
+            if (selectedIndex < _firstVisibleTab)
+            {
+                _firstVisibleTab = selectedIndex;
+                return;
+            }
+
+            while (selectedIndex > GetLastVisibleTab())
+            {
+                _firstVisibleTab++;
+
+                if (_firstVisibleTab >= _mapKeys.Count)
+                {
+                    _firstVisibleTab =
+                        Math.Max(0, _mapKeys.Count - 1);
+                    break;
+                }
+            }
+        }
         private void SelectRegion(int idx)
         {
             _sel           = idx;
