@@ -5,7 +5,6 @@ using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
-using static StardewValley.Menus.CoopMenu;
 
 namespace ForageTrackerMod
 {
@@ -156,6 +155,10 @@ namespace ForageTrackerMod
         private bool   _newMapDialogOpen = false;
         private string _newMapName       = "";
         private const int newMapW = 130;
+
+        // Delete map confirmation - dialogue
+        private bool _confirmDeleteMapOpen = false;
+        private string _mapPendingDelete = "";
 
         // Map binding: mapKey → SDV map-key string (e.g. "Town", "Island").
         // A map tab that has no binding is shown with an ⚠ warning.
@@ -783,6 +786,9 @@ namespace ForageTrackerMod
             if (_newMapDialogOpen)
                 DrawNewMapDialog(b);
 
+            // ── Delete map dialog ────────────────────────────────────────────────
+            if (_confirmDeleteMapOpen)
+                DrawDeleteMapDialog(b);
             drawMouse(b);
         }
 
@@ -1049,11 +1055,104 @@ namespace ForageTrackerMod
             DrawButton(b, ok,     "✓ Create", new Color(140, 220, 140));
             DrawButton(b, cancel, "✕ Cancel", new Color(220, 120, 120));
         }
+        private void DrawDeleteMapDialog(SpriteBatch b)
+        {
+            int dw = 420;
+            int dh = 180;
 
+            int dx = (Game1.uiViewport.Width - dw) / 2;
+            int dy = (Game1.uiViewport.Height - dh) / 2;
+
+            IClickableMenu.drawTextureBox(
+                b,
+                Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                dx,
+                dy,
+                dw,
+                dh,
+                Color.White,
+                drawShadow: true);
+
+            string msg =
+                $"Delete map tab\n\"{_mapPendingDelete}\"?\n\nThis cannot be undone.";
+
+            b.DrawString(
+                Game1.smallFont,
+                msg,
+                new Vector2(dx + 16, dy + 16),
+                Color.White,
+                0f,
+                Vector2.Zero,
+                0.75f,
+                SpriteEffects.None,
+                1f);
+
+            Rectangle deleteBtn =
+                new Rectangle(
+                    dx + 16,
+                    dy + dh - 52,
+                    (dw - 48) / 2,
+                    36);
+
+            Rectangle cancelBtn =
+                new Rectangle(
+                    deleteBtn.Right + 16,
+                    dy + dh - 52,
+                    (dw - 48) / 2,
+                    36);
+
+            DrawButton(
+                b,
+                deleteBtn,
+                "Delete",
+                new Color(220, 100, 80));
+
+            DrawButton(
+                b,
+                cancelBtn,
+                "Cancel",
+                new Color(140, 140, 140));
+        }
         // ── Input ─────────────────────────────────────────────────────────────
 
         public override void receiveLeftClick(int x, int y, bool playSound = true)
         {
+            // ── Delete confirmation ─────────────────────────────────
+            if (_confirmDeleteMapOpen)
+            {
+                int dw = 420;
+                int dh = 180;
+
+                int dx = (Game1.uiViewport.Width - dw) / 2;
+                int dy = (Game1.uiViewport.Height - dh) / 2;
+
+                Rectangle deleteBtn =
+                    new Rectangle(
+                        dx + 16,
+                        dy + dh - 52,
+                        (dw - 48) / 2,
+                        36);
+
+                Rectangle cancelBtn =
+                    new Rectangle(
+                        deleteBtn.Right + 16,
+                        dy + dh - 52,
+                        (dw - 48) / 2,
+                        36);
+
+                if (deleteBtn.Contains(x, y))
+                {
+                    DeleteCurrentMap();
+                }
+                else if (cancelBtn.Contains(x, y))
+                {
+                    _confirmDeleteMapOpen = false;
+                    _mapPendingDelete = "";
+                }
+
+                return;
+            }
             // ── New-map dialog takes priority ─────────────────────────────────
             if (_newMapDialogOpen)
             {
@@ -1201,16 +1300,10 @@ namespace ForageTrackerMod
             // Delete Map button — remove the current map tab (minimum 1 tab always kept)
             if (_btnDelMapRect.Contains(x, y) && _mapKeys.Count > 1)
             {
-                CommitName();
-                _editMaps.Remove(_currentMapKey);
-                _bindings.Remove(_currentMapKey);
-                _mapKeys.Remove(_currentMapKey);
-                _mapKeys.Sort();
-                _currentMapKey = _mapKeys[0];
-                _sel           = -1;
-                _fieldName     = "";
-                Game1.playSound("trashcan");
-                EnsureSelectedTabVisible();
+                _confirmDeleteMapOpen = true;
+                _mapPendingDelete = _currentMapKey;
+
+                Game1.playSound("smallSelect");
                 return;
             }
 
@@ -1382,6 +1475,12 @@ namespace ForageTrackerMod
             {
                 if (_dropdownOpen)      { _dropdownOpen = false; return; }
                 if (_newMapDialogOpen)  { _newMapDialogOpen = false; _newMapName = ""; _newMapError = ""; return; }
+                if (_confirmDeleteMapOpen)
+                {
+                    _confirmDeleteMapOpen = false;
+                    _mapPendingDelete = "";
+                    return;
+                }
                 exitThisMenu();
                 return;
             }
@@ -1413,7 +1512,39 @@ namespace ForageTrackerMod
 
         // Error message shown when the player tries to create a duplicate map name.
         private string _newMapError = "";
+        private void DeleteCurrentMap()
+        {
+            CommitName();
 
+            string deletedMap = _mapPendingDelete;
+
+            _editMaps.Remove(deletedMap);
+            _bindings.Remove(deletedMap);
+            _mapKeys.Remove(deletedMap);
+
+            _confirmDeleteMapOpen = false;
+            _mapPendingDelete = "";
+
+            if (_mapKeys.Count > 0)
+            {
+                int nextIndex =
+                    Math.Min(
+                        _mapKeys.Count - 1,
+                        _mapKeys.IndexOf(_currentMapKey));
+
+                if (nextIndex < 0)
+                    nextIndex = 0;
+
+                _currentMapKey = _mapKeys[nextIndex];
+            }
+
+            _sel = -1;
+            _fieldName = "";
+
+            EnsureSelectedTabVisible();
+
+            Game1.playSound("trashcan");
+        }
         private void ConfirmNewMap()
         {
             string key = _newMapName.Trim();
