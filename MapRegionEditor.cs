@@ -195,14 +195,27 @@ namespace ForageTrackerMod
             if (_editMaps.Count == 0)
                 _editMaps["Town"] = new List<MapRegionData>();
 
-            _mapKeys       = _editMaps.Keys.OrderBy(k => k).ToList();
-            _currentMapKey = _mapKeys[0];
-            EnsureSelectedTabVisible();
+
             // Load bindings (mapKey → SDV map key string)
             _bindings = cfg.Bindings != null
                 ? new Dictionary<string, string>(cfg.Bindings)
                 : new Dictionary<string, string>();
 
+            _mapKeys = _editMaps.Keys.OrderBy(k => k).ToList();
+
+            string? boundTab = FindTabBoundToCurrentMap();
+
+            if (boundTab != null && _mapKeys.Contains(boundTab))
+            {
+                _currentMapKey = boundTab;
+            }
+            else
+            {
+                // Graceful fallback
+                _currentMapKey = _mapKeys[0];
+            }
+            EnsureSelectedTabVisible();
+            ClampTabViewport();
             // ── Build the sidebar and map panel ──────────────────────────────
             int sw = Game1.uiViewport.Width;
             int sh = Game1.uiViewport.Height;
@@ -281,7 +294,18 @@ namespace ForageTrackerMod
 
             LayoutSidebar();
         }
+        private string? FindTabBoundToCurrentMap()
+        {
+            string liveMapKey = MapKeyHelper.GetCurrentMapKey();
 
+            foreach (var pair in _bindings)
+            {
+                if (pair.Value == liveMapKey)
+                    return pair.Key;
+            }
+
+            return null;
+        }
         // ── Suppress the farm-name banner that SDV draws over full-screen menus ─
 
         /// <summary>
@@ -778,7 +802,7 @@ namespace ForageTrackerMod
 
             int tabY =
                 _mapArea.Y - TabH - TabMapGap;
-
+            /*
             bool hiddenLeft =
                 _firstVisibleTab > 0;
 
@@ -788,7 +812,21 @@ namespace ForageTrackerMod
             bool hiddenRight =
                 lastVisible < _mapKeys.Count - 1;
 
-       
+       */
+
+            bool allFit = AllTabsFit();
+            if (allFit)
+            {
+                _firstVisibleTab = 0;
+            }
+            bool hiddenLeft = !allFit &&  _firstVisibleTab > 0;
+
+            int lastVisible =  GetLastVisibleTab();
+
+            bool hiddenRight =
+                !allFit &&
+                lastVisible < _mapKeys.Count - 1;
+
             const int newMapWw = 130;
 
             int tabsStartX = _mapArea.X + TabArrowW + 6;
@@ -814,6 +852,7 @@ namespace ForageTrackerMod
 
             if (hiddenRight)
                 DrawButton(b, _btnTabRightRect, ">", Color.White);
+
 
 
             const float scale = 0.68f;
@@ -1448,6 +1487,38 @@ namespace ForageTrackerMod
             }
 
             return Math.Max(last, _firstVisibleTab);
+        }
+        private void ClampTabViewport()
+        {
+            // If every tab fits, always reset viewport.
+            if (AllTabsFit())
+            {
+                _firstVisibleTab = 0;
+            }
+        }
+        private bool AllTabsFit()
+        {
+            int availableWidth =
+                GetTabViewportWidth();
+
+            int requiredWidth = 0;
+
+            foreach (string key in _mapKeys)
+            {
+                requiredWidth += GetTabWidth(key) + 2;
+            }
+
+            return requiredWidth <= availableWidth;
+        }
+        private int GetTabViewportWidth()
+        {
+            int left =
+                _mapArea.X + TabArrowW + 6;
+
+            int right =
+                _btnNewMapRect.X - 6;
+
+            return Math.Max(0, right - left);
         }
         private void EnsureSelectedTabVisible()
         {
