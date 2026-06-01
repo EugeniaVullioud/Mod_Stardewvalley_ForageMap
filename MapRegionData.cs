@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace ForageTrackerMod;
 
@@ -48,7 +49,14 @@ public sealed class MapRegionData
             ((uint)value.G << 8) |
              (uint)value.B;
     }
+    public uint TextColorPacked { get; set; } = 0xFFFFFFFF;
 
+    [JsonIgnore]
+    public Color TextColor
+    {
+        get => new Color(TextColorPacked);
+        set => TextColorPacked = value.PackedValue;
+    }
     /// <summary>
     /// Opacity (0–255) — stored as the alpha byte of ColorPacked.
     /// Getting or setting this is identical to reading/writing Color.A.

@@ -61,6 +61,18 @@ namespace ForageTrackerMod
             new(  0, 200, 200),
             new(255, 180, 200),
         };
+
+        private static readonly Color[] TextPalette =
+        {
+            Color.White,
+            Color.Black,
+            Color.Yellow,
+            Color.Cyan,
+            Color.LimeGreen,
+            Color.Orange,
+            Color.Red,
+            Color.Magenta
+        };
         private bool _draggingOpacity;
 
         // Tab navigation
@@ -115,7 +127,9 @@ namespace ForageTrackerMod
         private Rectangle _btnDelMapRect;          // "Delete this map tab" button
         private Rectangle _btnBindRect;            // "Bind to current map" button
         private readonly List<Rectangle> _tabRects = new();  // one per _mapKeys entry
-
+        private Rectangle _btnTextColorRect;
+        private Rectangle _textScaleSliderRect;
+        private bool _draggingTextScale;
         // Selection & drag
         private int    _sel      = -1;
         private bool   _dragging = false;
@@ -334,12 +348,21 @@ namespace ForageTrackerMod
             y += BtnH + Pad;
 
             _opacitySliderRect = new Rectangle(
-            x,
-            y,
-            w,
-            24);
+           x,
+           y,
+           w,
+           24);
+
+            // Text rekated
+            _btnTextColorRect = new Rectangle(x, y, w, BtnH);
+            y += BtnH + Pad;
+            y += 24 + Pad;
+
+            _textScaleSliderRect = new Rectangle( x, y, w, 24);
 
             y += 24 + Pad;
+           
+
 
             _edgeGrabSliderRect = new Rectangle(x, y, w, 24);
             y += 24 + Pad;
@@ -404,9 +427,24 @@ namespace ForageTrackerMod
                 DrawBorder(b, sr, isSel ? Color.White : (isHov ? Color.Yellow : r.Color), isSel ? 3 : (isHov ? 2 : 1));
 
                 if (sr.Width > 40)
-                    b.DrawString(Game1.smallFont, r.Name,
-                        new Vector2(sr.X + 4, sr.Y + 4),
-                        Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                {
+                    float scale = _cfg.RegionLabelScale;
+
+                    Vector2 size =
+                        Game1.smallFont.MeasureString(r.Name) * scale;
+
+                    float maxWidth = sr.Width - 8;
+                    float maxHeight = sr.Height - 8;
+
+                    if (size.X > maxWidth)
+                        scale *= maxWidth / size.X;
+
+                    size = Game1.smallFont.MeasureString(r.Name) * scale;
+
+                    if (size.Y > maxHeight)  scale *= maxHeight / size.Y;
+
+                    b.DrawString( Game1.smallFont, r.Name, new Vector2(sr.X + 4, sr.Y + 4), r.TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                }
 
                 if (isSel)
                 {
@@ -608,6 +646,8 @@ namespace ForageTrackerMod
                 b.Draw(Game1.fadeToBlackRect,
                     new Rectangle(_btnColorRect.Right - BtnH + 4,
                                   _btnColorRect.Y + 4, BtnH - 8, BtnH - 8),  r.Color);
+
+               
                 // Opacity 
                 b.DrawString( Game1.smallFont,
                     $"Opacity: {r.Opacity}",
@@ -629,6 +669,28 @@ namespace ForageTrackerMod
                 int thumbX =  _opacitySliderRect.X + (int)(_opacitySliderRect.Width * pct);
 
                 b.Draw( Game1.fadeToBlackRect, new Rectangle( thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
+
+
+                DrawButton(b, _btnTextColorRect, "Cycle Text Color", Color.White);
+
+                b.DrawString( Game1.smallFont, $"Text Size: {_cfg.RegionLabelScale:F2}", new Vector2( _textScaleSliderRect.X, _textScaleSliderRect.Y - 18), Color.White,  0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+
+                b.Draw(
+                    Game1.fadeToBlackRect,
+                    _textScaleSliderRect,
+                    Color.Black * 0.6f);
+
+                DrawBorder(
+                    b,
+                    _textScaleSliderRect,
+                    Color.White,
+                    1);
+
+                float pctTxt = (_cfg.RegionLabelScale - 0.4f) / (1.5f - 0.4f);
+
+                int thumbXText = _textScaleSliderRect.X + (int)(_textScaleSliderRect.Width * pctTxt);
+
+                b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXText - 4, _textScaleSliderRect.Y - 2, 8, _textScaleSliderRect.Height + 4), Color.White);
 
                 // Drag border
                 b.DrawString(Game1.smallFont, $"Border Tolerance: {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
@@ -1052,6 +1114,17 @@ namespace ForageTrackerMod
             if (_btnAddRegionRect.Contains(x, y)) { AddRegion();       return; }
             if (_btnDelRegionRect.Contains(x, y)) { DeleteSelected();  return; }
             if (_btnColorRect.Contains(x, y))     { CycleColor();      return; }
+            if (_btnTextColorRect.Contains(x, y))
+            {
+                CycleTextColor();
+                return;
+            }
+            if (_textScaleSliderRect.Contains(x, y))
+            {
+                _draggingTextScale = true;
+                UpdateTextScaleFromMouse(x);
+                return;
+            }
             if (_btnSaveRect.Contains(x, y))      { DoSave();          return; }
             if (_btnCancelRect.Contains(x, y))    { exitThisMenu();    return; }
             if (_opacitySliderRect.Contains(x, y))
@@ -1184,6 +1257,7 @@ namespace ForageTrackerMod
             _dragging = false;
             _draggingEdgeGrab = false;
             _draggingOpacity = false;
+            _draggingTextScale = false;
             _handle = Handle.None;
         }
 
@@ -1198,6 +1272,11 @@ namespace ForageTrackerMod
             if (_draggingEdgeGrab)
             {
                 UpdateEdgeGrabFromMouse(x);
+                return;
+            }
+            if (_draggingTextScale)
+            {
+                UpdateTextScaleFromMouse(x);
                 return;
             }
             if (!_dragging || _sel < 0) return;
@@ -1420,12 +1499,21 @@ namespace ForageTrackerMod
         private void AddRegion()
         {
             CommitName();
-            _currentRegions.Add(new MapRegionData
+            var region = new MapRegionData
             {
-                Name = "New Area", Locations = new(),
-                Left = 0.35f, Top = 0.35f, Right = 0.65f, Bottom = 0.65f,
+                Name = "New Area",
+                Locations = new(),
+                Left = 0.35f,
+                Top = 0.35f,
+                Right = 0.65f,
+                Bottom = 0.65f,
                 ColorPacked = 0x8000FF88
-            });
+            };
+
+            region.TextColor =
+                GetContrastColor(region.Color);
+
+            _currentRegions.Add(region);
             SelectRegion(_currentRegions.Count - 1);
             _nameFocused = true;
         }
@@ -1436,7 +1524,46 @@ namespace ForageTrackerMod
             _currentRegions.RemoveAt(_sel);
             _sel = -1; _fieldName = "";
         }
+        private static Color GetContrastColor(Color bg)
+        {
+            float luminance =
+                (0.299f * bg.R +
+                 0.587f * bg.G +
+                 0.114f * bg.B);
 
+            return luminance > 128f
+                ? Color.Black
+                : Color.White;
+        }
+        private void AutoContrastTextColor()
+        {
+            if (_sel < 0)
+                return;
+
+            var r = _currentRegions[_sel];
+
+            r.TextColor =
+                GetContrastColor(r.Color);
+        }
+        private void CycleTextColor()
+        {
+            if (_sel < 0)
+                return;
+
+            var r = _currentRegions[_sel];
+
+            Color current = r.TextColor;
+
+            int idx = Array.FindIndex(
+                TextPalette,
+                c => c.PackedValue == current.PackedValue);
+
+            if (idx < 0)
+                idx = 0;
+
+            r.TextColor =
+                TextPalette[(idx + 1) % TextPalette.Length];
+        }
         private void CycleColor()
         {
             if (_sel < 0) return;
@@ -1456,6 +1583,20 @@ namespace ForageTrackerMod
             next.A = current.A;   // keep transparency slider value
 
             r.Color = next;
+        }
+        private void UpdateTextScaleFromMouse(int mouseX)
+        {
+            float pct =
+                (mouseX - _textScaleSliderRect.X)
+                / (float)_textScaleSliderRect.Width;
+
+            pct = Math.Clamp(pct, 0f, 1f);
+
+            _cfg.RegionLabelScale =
+                MathHelper.Lerp(
+                    0.4f,
+                    1.5f,
+                    pct);
         }
         private void UpdateEdgeGrabFromMouse(int mouseX)
         {
@@ -1594,6 +1735,7 @@ namespace ForageTrackerMod
             Name = r.Name, Locations = new(r.Locations),
             Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom,
             ColorPacked = r.ColorPacked,
+            TextColorPacked = r.TextColorPacked,
             Opacity = r.Opacity
         };
 

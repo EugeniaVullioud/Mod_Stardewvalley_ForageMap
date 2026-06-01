@@ -11,7 +11,7 @@ public sealed class MapRegionConfig
     public Dictionary<string, List<MapRegionData>> RegionsByMap { get; set; } = DefaultRegions();
 
     public int EdgeGrabPixels { get; set; } = 10;
-
+    public float RegionLabelScale { get; set; } = 0.6f;
     /// <summary>
     /// Maps each editor map-tab key to the SDV map key it is bound to
     /// (e.g. "MyIslandTab" → "Island").  The tooltip uses this to decide
