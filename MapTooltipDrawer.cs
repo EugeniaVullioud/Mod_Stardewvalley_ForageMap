@@ -103,140 +103,7 @@ namespace ForageTrackerMod
                 return;
 
             Rectangle mapImageRect = rd.DestinationRect;
-            //works
-            Rectangle actualRect =
-                MapRenderUtility.ComputeActualMapRect(mapPage);
-
-            DrawDebugBorder(
-                b,
-                actualRect,
-                Color.LimeGreen,
-                4);
-
-            //end works
-            foreach (var a in typeof(MapPage).GetFields(
-    BindingFlags.Instance |
-    BindingFlags.NonPublic |
-    BindingFlags.Public))
-            {
-                if (a.FieldType == typeof(Rectangle))
-                {
-                    var r = (Rectangle)a.GetValue(mapPage)!;
-
-                    Monitor.Log(
-                        $"RECT FIELD {a.Name} = X:{r.X} Y:{r.Y} W:{r.Width} H:{r.Height}",
-                        LogLevel.Warn);
-                }
-            }
-
-            foreach (var prop in typeof(MapPage).GetProperties(
-    BindingFlags.Instance |
-    BindingFlags.NonPublic |
-    BindingFlags.Public))
-            {
-                if (prop.PropertyType == typeof(Rectangle))
-                {
-                    try
-                    {
-                        var r = (Rectangle)prop.GetValue(mapPage)!;
-
-                        Monitor.Log(
-                            $"RECT PROP {prop.Name} = X:{r.X} Y:{r.Y} W:{r.Width} H:{r.Height}",
-                            LogLevel.Warn);
-                    }
-                    catch { }
-                }
-            }
-            Monitor?.Log(
-    $"GameMenu: x={gameMenu.xPositionOnScreen} " +
-    $"y={gameMenu.yPositionOnScreen} " +
-    $"w={gameMenu.width} " +
-    $"h={gameMenu.height}",
-    LogLevel.Warn);
-            foreach (var f in typeof(MapPage)
-    .GetFields(BindingFlags.Instance |
-               BindingFlags.NonPublic |
-               BindingFlags.Public))
-            {
-                try
-                {
-                    object? vv = f.GetValue(mapPage);
-
-                    Monitor?.Log(
-                        $"{f.FieldType.Name} {f.Name} = {vv}",
-                        LogLevel.Debug);
-                }
-                catch
-                {
-                }
-            }
-            foreach (var p in typeof(MapPage)
-    .GetProperties(BindingFlags.Instance |
-                   BindingFlags.NonPublic |
-                   BindingFlags.Public))
-            {
-                try
-                {
-                    object? v = p.GetValue(mapPage);
-
-                    Monitor?.Log(
-                        $"PROP {p.PropertyType.Name} {p.Name} = {v}",
-                        LogLevel.Debug);
-                }
-                catch
-                {
-                }
-            }
-            Monitor.Log(
-    $"UIScale={Game1.options.uiScale}",
-    LogLevel.Debug);
-
-            var field = typeof(MapPage).GetField(
-    "mapPosition",
-    BindingFlags.Instance | BindingFlags.NonPublic);
-
-            var value = field?.GetValue(mapPage);
-
-            if (value != null)
-            {
-                foreach (var f in value.GetType().GetFields(
-                    BindingFlags.Instance |
-                    BindingFlags.Public |
-                    BindingFlags.NonPublic))
-                {
-                    Monitor.Log(
-                        $"mapPosition.{f.Name} = {f.GetValue(value)}",
-                        LogLevel.Warn);
-                }
-            }
-            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-            foreach (var ff in typeof(MapPage).GetFields(flags))
-            {
-                try
-                {
-                    if (ff.FieldType == typeof(Rectangle))
-                    {
-                        var vvv = (Rectangle)ff.GetValue(mapPage)!;
-
-                        Monitor?.Log(
-                            $"RECT FIELD {ff.Name} = " +
-                            $"X:{vvv.X} Y:{vvv.Y} W:{vvv.Width} H:{vvv.Height}",
-                            LogLevel.Warn);
-                    }
-                }
-                catch { }
-            }
-            DrawMarker(
-b,
-gameMenu.xPositionOnScreen,
-gameMenu.yPositionOnScreen,
-Color.Blue);
-            DrawMarker(
-    b,
-    gameMenu.xPositionOnScreen + mapPage.xPositionOnScreen,
-    gameMenu.yPositionOnScreen + mapPage.yPositionOnScreen,
-    Color.Lime);
+           
             // ── Compute the map image rect ────────────────────────────────────
             //
             // In SDV 1.6, MapPage stretches the world map to fill its entire
@@ -267,13 +134,12 @@ Color.Blue);
             int fitX = mapPage.xPositionOnScreen + (pageW - fitW) / 2;
             int fitY = mapPage.yPositionOnScreen + (pageH - fitH) / 2;
 
+           // Rectangle mapImageRect = new Rectangle(fitX, fitY, fitW, fitH);
             LastLiveMapRect = mapImageRect;
 
             // ── Debug overlay — draws BEFORE tooltip so tooltip is on top ─────
             // BEGIN DEBUG BLOCK — remove or set DebugMode = false to disable
-            if (DebugMode)  DrawDebugOverlay(b, mapPage, mapImageRect);
-      
-            // END DEBUG BLOCK
+            if (DebugMode) DrawDebugOverlay(b, mapPage, mapImageRect);      
 
             try
             {
@@ -342,9 +208,6 @@ Color.Blue);
         /// </summary>
         private static void DrawDebugOverlay(SpriteBatch b, MapPage mapPage, Rectangle mapImageRect)
         {
-            // Current computed rect
-            DrawDebugBorder(b, mapImageRect, Color.Red,4);
-
             string liveKey   = MapKeyHelper.GetMapKey(mapPage);
             string editorKey = ResolveEditorKey(liveKey);
 
@@ -450,23 +313,56 @@ Color.Blue);
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
             string editorKey  = ResolveEditorKey(liveMapKey);
 
-            if (!s_regionsByMap.TryGetValue(editorKey, out var regions))
+            // ── Player-defined region rectangles ──────────────────────────────
+            // Check these first — player rectangles take priority over vanilla points.
+            if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
-                Monitor?.Log($"[Tooltip] No regions for editor key '{editorKey}' " +
-                             $"(live: '{liveMapKey}'). " +
-                             $"Known: {string.Join(", ", s_regionsByMap.Keys)}", LogLevel.Trace);
-                return null;
+                foreach (var region in regions)
+                {
+                    if (relX >= region.Left  && relX <= region.Right &&
+                        relY >= region.Top   && relY <= region.Bottom)
+                        return region.Name;
+                }
             }
 
-            foreach (var region in regions)
+            // ── Vanilla mapPage.points fallback ───────────────────────────────
+            // mapPage.points contains named clickable spots for landmarks like
+            // the Quarry entrance, Carpenter Shop, etc. If the cursor is over
+            // one of these AND the tracker has forage data for that location,
+            // show it even without a player-defined region rectangle.
+            // The component .name is the internal location name in most cases.
+            foreach (var point in mapPage.points.Values)
             {
-                if (relX >= region.Left  && relX <= region.Right &&
-                    relY >= region.Top   && relY <= region.Bottom)
-                    return region.Name;
+                if (!point.containsPoint(mouseX, mouseY))
+                    continue;
+
+                // The component name may be a display label, not an internal
+                // location name. Try it directly, then try tracker lookup.
+                string pointName = point.name;
+
+                if (Tracker != null && Tracker.IsTracked(pointName))
+                    return pointName;
+
+                // Fuzzy: find a tracked location whose name is contained in
+                // or contains the point name (handles partial matches).
+                if (Tracker != null)
+                {
+                    string lower = pointName.ToLowerInvariant();
+                    foreach (var (lk, ok) in s_lowercaseKeyCache)
+                    {
+                        if (lower.Contains(lk) || lk.Contains(lower))
+                            return ok;
+                    }
+                }
             }
 
             return null;
         }
+
+        // When returning a vanilla point name directly (not a region name),
+        // ResolveLocationNames needs to handle it — it resolves by treating
+        // the name as a direct location name if it's not a region.
+        // This already works via the result.Add(regionName) fallback below.
 
         // =========================================================================
         // Location resolution

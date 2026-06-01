@@ -129,13 +129,9 @@ namespace ForageTrackerModSV
         /// </summary>
         public static bool TryGetMapRenderData(MapPage page, out MapRenderData data)
         {
-            Rectangle actualMapRect =
-             ComputeActualMapRect(page);
+            Rectangle actualMapRect = ComputeActualMapRect(page);
 
-            data = new MapRenderData(
-                Game1.mouseCursors,
-                Rectangle.Empty,
-                actualMapRect);
+            data = new MapRenderData( Game1.mouseCursors, Rectangle.Empty, actualMapRect);
 
             return true;
         }

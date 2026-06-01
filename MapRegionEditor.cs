@@ -287,12 +287,10 @@ namespace ForageTrackerMod
             // fraction math in the editor — only _mapArea is.
             MapTooltipDrawer.LastLiveMapRect ??= new Rectangle(mapX, mapY, mapW, mapH);
 
-            // Build location list: hardcoded known locations + runtime tracker data
+            // Build location list from the live game world — no hardcoding.
+            // BuildKnownLocations() walks Game1.locations + building interiors,
+            // so Quarry and all modded locations appear automatically.
             _allLocations = BuildKnownLocations();
-            if (MapTooltipDrawer.Tracker != null)
-                foreach (var name in MapTooltipDrawer.Tracker.TrackedLocationNames)
-                    if (!_allLocations.Contains(name))
-                        _allLocations.Add(name);
             _allLocations.Sort();
 
             LayoutSidebar();
@@ -1907,26 +1905,44 @@ namespace ForageTrackerMod
         };
 
         /// <summary>
-        /// The canonical list of all known SDV location names.
-        /// This is what populates the dropdown. Modded locations discovered
-        /// at runtime via ForageTracker are appended on top of this.
+        /// Builds the location list from the live game world at runtime.
+        /// Reads Game1.locations and all building interiors — no hardcoding,
+        /// so Quarry, modded locations, and anything else appears automatically.
+        /// Also merges any names already tracked by ForageTracker.
         /// </summary>
-        private static List<string> BuildKnownLocations() => new()
+        private static List<string> BuildKnownLocations()
         {
-            "Town", "Forest", "Mountain", "Beach", "Farm", "FarmHouse",
-            "Cellar", "Greenhouse", "Mine", "Woods", "Railroad",
-            "Desert", "SandyHouse", "SkullCave",
-            "IslandSouth", "IslandNorth", "IslandEast", "IslandWest",
-            "IslandFarmHouse", "IslandFieldOffice", "IslandShrine",
-            "Caldera", "VolcanoDungeon0",
-            "Sewer", "BugLand",
-            "WitchSwamp", "WitchHut", "WitchWarpCave",
-            "BathHousePool", "BathHouseEntry", "BathHouseLocker",
-            "JoshHouse", "HaleyHouse", "SamHouse", "Blacksmith", "Museum",
-            "Hospital", "ElliottHouse", "AdventureGuild", "FishShop",
-            "LeahHouse", "AnimalShop", "WizardHouse", "WizardHouseBasement",
-            "Carpenter", "ScienceHouse", "ManorHouse", "Saloon",
-            "Tent", "Trailer", "Sunroom",
-        };
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<string>();
+
+            void Add(string? name)
+            {
+                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name!))
+                    list.Add(name!);
+            }
+
+            // Walk all loaded game locations and their building interiors.
+            // This picks up Quarry, Mines, and any modded locations that are
+            // present in Game1.locations at editor-open time.
+            foreach (var loc in Game1.locations)
+            {
+                if (loc == null) continue;
+                Add(loc.Name);
+                foreach (var building in loc.buildings)
+                {
+                    var interior = building.indoors.Value;
+                    if (interior != null) Add(interior.Name);
+                }
+            }
+
+            // Also merge every name the ForageTracker has seen this session.
+            // This covers locations that spawn forageables but aren't in
+            // Game1.locations at editor-open time (e.g. dynamically loaded areas).
+            if (MapTooltipDrawer.Tracker != null)
+                foreach (var name in MapTooltipDrawer.Tracker.TrackedLocationNames)
+                    Add(name);
+
+            return list;
+        }
     }
 }
