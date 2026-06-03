@@ -13,8 +13,8 @@ namespace ForageTrackerMod
         // ── Injected dependencies ─────────────────────────────────────────────
 
         public static ForageTracker? Tracker { get; set; }
-        public static ModConfig?     Config  { get; set; }
-        public static IMonitor?      Monitor { get; set; }
+        public static ModConfig? Config { get; set; }
+        public static IMonitor? Monitor { get; set; }
 
         // ── Region storage ────────────────────────────────────────────────────
 
@@ -59,14 +59,14 @@ namespace ForageTrackerMod
 
         private sealed class IconData
         {
-            public Texture2D Texture    { get; init; } = null!;
+            public Texture2D Texture { get; init; } = null!;
             public Rectangle SourceRect { get; init; }
         }
         private static readonly Dictionary<string, IconData?> s_iconCache = new();
 
         // ── Scale cache ───────────────────────────────────────────────────────
 
-        private static float _cachedUiScale   = -1f;
+        private static float _cachedUiScale = -1f;
         private static float _cachedIconScale = -1f;
         private static float _iconPx;
         private static float _spriteScale;
@@ -103,7 +103,7 @@ namespace ForageTrackerMod
                 return;
 
             Rectangle mapImageRect = rd.DestinationRect;
-           
+
             // ── Compute the map image rect ────────────────────────────────────
             //
             // In SDV 1.6, MapPage stretches the world map to fill its entire
@@ -134,12 +134,12 @@ namespace ForageTrackerMod
             int fitX = mapPage.xPositionOnScreen + (pageW - fitW) / 2;
             int fitY = mapPage.yPositionOnScreen + (pageH - fitH) / 2;
 
-           // Rectangle mapImageRect = new Rectangle(fitX, fitY, fitW, fitH);
+            // Rectangle mapImageRect = new Rectangle(fitX, fitY, fitW, fitH);
             LastLiveMapRect = mapImageRect;
 
             // ── Debug overlay — draws BEFORE tooltip so tooltip is on top ─────
             // BEGIN DEBUG BLOCK — remove or set DebugMode = false to disable
-            if (DebugMode) DrawDebugOverlay(b, mapPage, mapImageRect);      
+            if (DebugMode) DrawDebugOverlay(b, mapPage, mapImageRect);
 
             try
             {
@@ -208,7 +208,7 @@ namespace ForageTrackerMod
         /// </summary>
         private static void DrawDebugOverlay(SpriteBatch b, MapPage mapPage, Rectangle mapImageRect)
         {
-            string liveKey   = MapKeyHelper.GetMapKey(mapPage);
+            string liveKey = MapKeyHelper.GetMapKey(mapPage);
             string editorKey = ResolveEditorKey(liveKey);
 
             int mouseX = Game1.getMouseX();
@@ -223,10 +223,10 @@ namespace ForageTrackerMod
                 {
                     // Convert fractions to screen pixels using the LIVE map rect
                     // (same calculation as the hit-test uses)
-                    int rx = mapImageRect.X + (int)(region.Left  * mapImageRect.Width);
-                    int ry = mapImageRect.Y + (int)(region.Top   * mapImageRect.Height);
-                    int rw = (int)((region.Right  - region.Left) * mapImageRect.Width);
-                    int rh = (int)((region.Bottom - region.Top)  * mapImageRect.Height);
+                    int rx = mapImageRect.X + (int)(region.Left * mapImageRect.Width);
+                    int ry = mapImageRect.Y + (int)(region.Top * mapImageRect.Height);
+                    int rw = (int)((region.Right - region.Left) * mapImageRect.Width);
+                    int rh = (int)((region.Bottom - region.Top) * mapImageRect.Height);
                     var sr = new Rectangle(rx, ry, Math.Max(rw, 2), Math.Max(rh, 2));
 
                     // Semi-transparent fill
@@ -264,10 +264,10 @@ namespace ForageTrackerMod
 
         private static void DrawDebugBorder(SpriteBatch b, Rectangle r, Color c, int t)
         {
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Y,          r.Width,  t),        c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Bottom - t, r.Width,  t),        c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Y,          t,        r.Height), c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.Right  - t, r.Y,          t,        r.Height), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, r.Width, t), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Bottom - t, r.Width, t), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, t, r.Height), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.Right - t, r.Y, t, r.Height), c);
         }
 
         // =========================================================================
@@ -311,7 +311,7 @@ namespace ForageTrackerMod
                 return null;
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey  = ResolveEditorKey(liveMapKey);
+            string editorKey = ResolveEditorKey(liveMapKey);
 
             // ── Player-defined region rectangles ──────────────────────────────
             // Check these first — player rectangles take priority over vanilla points.
@@ -319,8 +319,8 @@ namespace ForageTrackerMod
             {
                 foreach (var region in regions)
                 {
-                    if (relX >= region.Left  && relX <= region.Right &&
-                        relY >= region.Top   && relY <= region.Bottom)
+                    if (relX >= region.Left && relX <= region.Right &&
+                        relY >= region.Top && relY <= region.Bottom)
                         return region.Name;
                 }
             }
@@ -381,7 +381,7 @@ namespace ForageTrackerMod
             var result = new List<string>(8);
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey  = ResolveEditorKey(liveMapKey);
+            string editorKey = ResolveEditorKey(liveMapKey);
 
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
@@ -414,14 +414,14 @@ namespace ForageTrackerMod
                     {
                         merged[displayName] = new ForageTracker.SummaryEntry
                         {
-                            ItemId    = entry.ItemId,
-                            Total     = entry.Total,
+                            ItemId = entry.ItemId,
+                            Total = entry.Total,
                             Remaining = entry.Remaining
                         };
                     }
                     else
                     {
-                        existing.Total     += entry.Total;
+                        existing.Total += entry.Total;
                         existing.Remaining += entry.Remaining;
                     }
                 }
@@ -435,17 +435,17 @@ namespace ForageTrackerMod
 
         private static void RefreshScaleCache()
         {
-            float ui   = Game1.options.uiScale;
+            float ui = Game1.options.uiScale;
             float icon = Config!.IconScale;
             if (ui == _cachedUiScale && icon == _cachedIconScale) return;
 
-            _cachedUiScale   = ui;
+            _cachedUiScale = ui;
             _cachedIconScale = icon;
-            _iconPx       = MathF.Round(24f * ui * icon);
-            _spriteScale  = _iconPx / 16f;
-            _lineHeight   = _iconPx + 6f * ui;
-            _padding      = 20f * ui;
-            _textScale    = 0.75f * ui;
+            _iconPx = MathF.Round(24f * ui * icon);
+            _spriteScale = _iconPx / 16f;
+            _lineHeight = _iconPx + 6f * ui;
+            _padding = 20f * ui;
+            _textScale = 0.75f * ui;
             _headerHeight = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).Y * _textScale;
         }
 
@@ -463,9 +463,9 @@ namespace ForageTrackerMod
             SpriteBatch b, int mouseX, int mouseY, float vanillaH,
             Dictionary<string, ForageTracker.SummaryEntry> summary)
         {
-            DisplayMode mode       = Config!.Display;
-            bool showIcons  = mode is DisplayMode.Both or DisplayMode.IconOnly;
-            bool showText   = mode is DisplayMode.Both or DisplayMode.TextOnly;
+            DisplayMode mode = Config!.Display;
+            bool showIcons = mode is DisplayMode.Both or DisplayMode.IconOnly;
+            bool showText = mode is DisplayMode.Both or DisplayMode.TextOnly;
             bool remainOnly = Config.ShowRemainingOnly;
 
             s_lineBuffer.Clear();
@@ -491,21 +491,21 @@ namespace ForageTrackerMod
             if (s_lineBuffer.Count == 0) return;
 
             float iconColW = showIcons ? _iconPx + 6f * _cachedUiScale : 0f;
-            float headerW  = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).X * _textScale;
+            float headerW = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).X * _textScale;
             float contentW = Math.Max(headerW, iconColW + maxLabelW);
-            float boxW     = contentW + _padding * 2f;
-            float boxH     = _padding * 2f + _headerHeight + 4f * _cachedUiScale
+            float boxW = contentW + _padding * 2f;
+            float boxH = _padding * 2f + _headerHeight + 4f * _cachedUiScale
                            + s_lineBuffer.Count * _lineHeight;
 
             float screenW = Game1.uiViewport.Width;
             float screenH = Game1.uiViewport.Height;
-            float bx      = mouseX + 28f * _cachedUiScale;
-            float by      = mouseY + vanillaH;
+            float bx = mouseX + 28f * _cachedUiScale;
+            float by = mouseY + vanillaH;
 
             if (bx + boxW > screenW - _padding) bx = screenW - boxW - _padding;
-            if (bx < _padding)                  bx = _padding;
+            if (bx < _padding) bx = _padding;
             if (by + boxH > screenH - _padding) by = mouseY - vanillaH - boxH - 4f * _cachedUiScale;
-            if (by < _padding)                  by = _padding;
+            if (by < _padding) by = _padding;
 
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
                 new Rectangle(0, 256, 60, 60),
@@ -542,7 +542,7 @@ namespace ForageTrackerMod
                 try
                 {
                     var parsed = ItemRegistry.GetDataOrErrorItem(itemId);
-                    var tex    = parsed.GetTexture();
+                    var tex = parsed.GetTexture();
                     icon = tex != null
                         ? new IconData { Texture = tex, SourceRect = parsed.GetSourceRect() }
                         : null;

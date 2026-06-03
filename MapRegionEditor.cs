@@ -42,12 +42,49 @@ namespace ForageTrackerMod
     {
         // ── Layout constants ──────────────────────────────────────────────────
 
-        private const int SidebarW  = 320;
-        private const int Pad       = 12;
-        private const int BtnH      = 40;
-        private const int TabH      = 44;   // taller tabs so text is comfortable
-        private const float MinFrac = 0.02f;
-        private const int TabMapGap = 8; // space between tabs and map
+        int SidebarW;
+        int TabMapGap =2;
+
+        /// <summary>
+        /// All size constants derived from a single TextScale value.
+        /// Recomputed in the constructor and whenever the scale changes.
+        /// </summary>
+        private struct UI
+        {
+            // The one knob — change this and everything adjusts.
+            public float TextScale;     // e.g. 0.65
+
+            // Derived heights (all measured from smallFont line height)
+            public int LineH;           // smallFont.LineSpacing * TextScale  → text line
+            public int LabelH;          // LineH + 2                          → label above a control
+            public int FieldH;          // LineH * 2                          → text field / dropdown
+            public int SliderH;         // LineH + 4                          → slider track
+            public int BtnH;            // FieldH + Pad / 2                   → button
+            public int TabH;            // BtnH                               → map tab
+            public int RowH;            // FieldH                             → list row
+            public int Pad;             // LineH                              → general padding
+
+            // SidebarW removed — sidebar width is now _sideArea.Width, computed
+            // dynamically in the constructor after the map area is placed.
+            public static UI Compute(float textScale, int screenW)
+            {
+                var u = new UI();
+                u.TextScale = textScale;
+                u.LineH = (int)Math.Ceiling(Game1.smallFont.LineSpacing * textScale);
+                u.LabelH = u.LineH + 2;
+                u.FieldH = u.LineH * 2;
+                u.SliderH = u.LineH + 4;
+                u.BtnH = u.FieldH + u.LineH / 2;
+                u.TabH = u.BtnH;
+                u.RowH = u.FieldH;
+                u.Pad = Math.Max(6, u.LineH);
+                return u;
+            }
+        }
+
+        private UI _ui;
+
+
 
         private static readonly Color[] Palette =
         {
@@ -82,7 +119,7 @@ namespace ForageTrackerMod
         private int _firstVisibleTab = 0;
 
         // Width reserved for navigation buttons
-        private const int TabArrowW = 40;
+        private int TabArrowW => _ui.BtnH;
 
         // All known SDV location names — shown in the dropdown.
         // Populated once in constructor from hardcoded list + runtime tracker data.
@@ -177,8 +214,7 @@ namespace ForageTrackerMod
 
         // ── Constructor ───────────────────────────────────────────────────────
 
-        public MapRegionEditor(
-            IModHelper helper, IMonitor monitor,
+        public MapRegionEditor(IModHelper helper, IMonitor monitor,
             MapRegionConfig cfg, Action<MapRegionConfig> onSave)
             : base(0, 0, Game1.uiViewport.Width, Game1.uiViewport.Height)
         {
@@ -187,6 +223,9 @@ namespace ForageTrackerMod
             _cfg     = cfg;
             _onSave  = onSave;
 
+            _ui = UI.Compute(0.65f, Game1.uiViewport.Width);
+
+            // _ui.SidebarW used as the minimum reservation; actual width set after map placement.
             _edgeGrab = Math.Max(2, cfg.EdgeGrabPixels);
 
             // Deep-copy all maps so edits don't affect live data until Save
@@ -195,8 +234,7 @@ namespace ForageTrackerMod
                 kv => kv.Value.Select(CloneRegion).ToList());
 
             // Ensure at least one map exists
-            if (_editMaps.Count == 0)
-                _editMaps["Town"] = new List<MapRegionData>();
+            if (_editMaps.Count == 0) _editMaps["Town"] = new List<MapRegionData>();
 
 
             // Load bindings (mapKey → SDV map key string)
@@ -219,73 +257,57 @@ namespace ForageTrackerMod
             }
             EnsureSelectedTabVisible();
             ClampTabViewport();
-            // ── Build the sidebar and map panel ──────────────────────────────
+            // ── Compute map area then fit sidebar to whatever remains ─────────
+            //
+            // ORDER MATTERS: map first, sidebar second.
+            //
+            // The live map size is controlled by SDV's UI scale, so it changes
+            // at runtime. We must place the map first (using the real rendered
+            // rect from ComputeActualMapRect), then position the sidebar to the
+            // RIGHT of the map — never overlapping it — using whatever horizontal
+            // space is left over. This way the sidebar always adjusts to the map
+            // size regardless of UI scale.
+            //
+            // Map area: letterbox the native 1360×720 map image into the full
+            // screen minus the minimum sidebar width and padding. Then use
+            // ComputeActualMapRect to get the true drawn sub-rect (which may be
+            // smaller than the MapPage bounds due to internal SDV margins).
+            //
+            // Sidebar: anchored to _mapArea.Right + Pad, filling the remaining
+            // screen width. SidebarW is clamped so it never exceeds what fits.
+
             int sw = Game1.uiViewport.Width;
             int sh = Game1.uiViewport.Height;
 
-            _sideArea = new Rectangle(sw - SidebarW - Pad, Pad, SidebarW, sh - Pad * 2);
-
-            // ── Compute _mapArea by letterboxing the native map image size ────
-            //
-            // WHY NOT USE MapPage / GameMenu:
-            //   In SDV 1.6, MapPage.draw() uses Game1.mapDisplayDevice which
-            //   stretches the world map to fill the MapPage's full
-            //   xPositionOnScreen/yPositionOnScreen/width/height bounds with NO
-            //   letterboxing. Creating a throwaway GameMenu returns its MapPage
-            //   bounds, which equal nearly the full viewport — so the letterbox
-            //   calculation in the editor produced an _mapArea almost as large as
-            //   the screen, leaving the map drawn over a huge background square.
-            //
-            // THE FIX:
-            //   Letterbox the NATIVE MAP IMAGE DIMENSIONS into the available
-            //   editor panel space ourselves. The native Stardew Valley world map
-            //   image is 1360 × 720 pixels (this is the source rect SDV uses when
-            //   rendering via mapDisplayDevice in 1.6). Letterboxing this into
-            //   the panel gives us the correct proportional display rect.
-            //
-            //   The tooltip side (MapTooltipDrawer) uses the live MapPage bounds
-            //   directly (they ARE the draw rect in 1.6 — no letterbox there).
-            //   We reconcile these two coordinate systems by storing _mapArea and
-            //   using it for ALL fraction ↔ pixel conversions in the editor, while
-            //   the tooltip stores its rect in LastLiveMapRect. The two rects have
-            //   the same ASPECT RATIO, so the fractions are equivalent even though
-            //   the absolute pixel positions differ.
-            //
-            // Native map image size — matches the SDV 1.6 world map source.
-            // If a modded map has a different size the regions will still work
-            // correctly as long as the aspect ratio is similar; the player can
-            // adjust region boundaries visually in the editor.
+            // ── Step 1: map area ──────────────────────────────────────────────
             const int NativeMapW = 1360;
             const int NativeMapH = 720;
 
-            int availW = sw - SidebarW - Pad * 3;
-            int availH = sh - Pad * 2 - TabH - TabMapGap;
+            // Reserve minimum sidebar space so the map doesn't crush it.
+            int minSidebar = 260; 
+            int availW = sw - minSidebar - _ui.Pad * 3;
+            int availH = sh - _ui.Pad * 2 - _ui.TabH - TabMapGap;
 
             float scaleX = (float)availW / NativeMapW;
             float scaleY = (float)availH / NativeMapH;
-            float scale  = Math.Min(scaleX, scaleY);
+            float mapScale = Math.Min(scaleX, scaleY);
 
-            int mapW = (int)(NativeMapW * scale);
-            int mapH = (int)(NativeMapH * scale);
-            // Centre the image in the available panel space
-            int mapX = Pad + (availW - mapW) / 2;
-            int mapY = Pad + TabH + TabMapGap + (availH - mapH) / 2;
+            int mapW = (int)(NativeMapW * mapScale);
+            int mapH = (int)(NativeMapH * mapScale);
+            int mapX = _ui.Pad + (availW - mapW) / 2;
+            int mapY = _ui.Pad + _ui.TabH + TabMapGap + (availH - mapH) / 2;
 
             _mapPanel = new Rectangle(mapX, mapY, mapW, mapH);
-            //_mapArea  = _mapPanel;  // they are identical — no wasted border space
-            // MapPage is constructed to exactly match _mapArea so its content
-            // lines up with the region overlays we draw on top.
-            // In SDV 1.6 MapPage stretches its content to fill its bounds,
-            // so giving it our letterboxed rect produces the correct display.
-            _mapPage = new MapPage(mapX, mapY, mapW, mapH);
-            _mapArea = MapRenderUtility.ComputeActualMapRect(_mapPage);
+            _mapPage  = new MapPage(mapX, mapY, mapW, mapH);
+            _mapArea  = MapRenderUtility.ComputeActualMapRect(_mapPage);
 
-
-            // Publish our computed rect so MapTooltipDrawer can compare if needed.
-            // The live tooltip uses the real GameMenu MapPage bounds (which are
-            // the full draw area in 1.6), so LastLiveMapRect is NOT used for
-            // fraction math in the editor — only _mapArea is.
             MapTooltipDrawer.LastLiveMapRect ??= new Rectangle(mapX, mapY, mapW, mapH);
+
+            // ── Step 2: sidebar — right of _mapArea, never overlapping it ─────
+            int sideX = _mapArea.Right + _ui.Pad;
+            int sideW = sw - sideX - _ui.Pad;          // fill remaining width
+            sideW = Math.Clamp(sideW, 260, 480);
+            _sideArea = new Rectangle(sideX, _ui.Pad, sideW, sh - _ui.Pad * 2);
 
             // Build location list from the live game world — no hardcoding.
             // BuildKnownLocations() walks Game1.locations + building interiors,
@@ -294,6 +316,18 @@ namespace ForageTrackerMod
             _allLocations.Sort();
 
             LayoutSidebar();
+        }
+        private SidebarRow NextLabeledControl(VerticalLayout layout, int controlHeight)
+        {
+            const int LabelHeight = 18;
+
+            SidebarRow row = new();
+
+            row.LabelRect =layout.Next(LabelHeight);
+
+            row.ControlRect = layout.Next(controlHeight);
+
+            return row;
         }
         private string? FindTabBoundToCurrentMap()
         {
@@ -340,78 +374,144 @@ namespace ForageTrackerMod
             // Kept as a hook in case future SDV versions need per-tab recalculation.
         }
 
+        // ── Dynamic sidebar layout ────────────────────────────────────────────
+        //
+        // The sidebar height changes with every screen resolution. This method
+        // measures the total space required for fixed-height controls, then
+        // allocates what remains to the scrollable location list. Everything is
+        // computed from _sideArea at call time — no hardcoded pixel offsets.
+        //
+        // Fixed regions (top → bottom):
+        //   Header block    : title + map key + hint  (~80 px, measured)
+        //   Name field      : label (18) + field (34) + gap
+        //   Location header : label (18) + dropdown row (34) + gap
+        //   Location list   : dynamic — as many LocListRowH rows as fit
+        //   Scrollbar       : same height as list, 10 px wide (right-aligned)
+        //   Color button    : BtnH
+        //   Opacity slider  : label (18) + slider (24) + gap
+        //   Text color btn  : 24
+        //   Text scale      : label (18) + slider (24) + gap
+        //   Edge grab       : label (18) + slider (24) + gap
+        //   Separator gap   : Pad * 2
+        //   Bind + Del Map  : BtnH (side by side)
+        //   Add + Del Region: BtnH (side by side)
+        //   Save            : BtnH
+        //   Cancel          : BtnH
+        //   Bottom padding  : Pad
         private void LayoutSidebar()
         {
-            int x = _sideArea.X + Pad;
-            int w = _sideArea.Width - Pad * 2;
-            int y = _sideArea.Y + Pad + 80; // title + map key label + hint
+            int x = _sideArea.X + _ui.Pad;
+            int w = _sideArea.Width - _ui.Pad * 2;
+
+            // ── Measure all fixed-height elements ─────────────────────────────
+            const int LabelH   = 18;
+            const int FieldH   = 34;
+            const int SliderH  = 24;
+            const int Gap      = 20;
+
+            // Fixed cost below the header (does not include the location list)
+            int fixedCost =
+                  LabelH + FieldH + Gap          // name field
+                + LabelH + FieldH + Gap          // location dropdown
+                + Gap                            // gap between list and color btn
+                + _ui.BtnH + Gap                     // color button
+                + LabelH + SliderH + Gap         // opacity slider
+                + SliderH + Gap                  // text color button
+                + LabelH + SliderH + Gap         // text scale slider
+                + LabelH + SliderH + Gap         // edge grab slider
+                + Gap * 2                        // separator before map buttons
+                + _ui.BtnH + Gap                     // bind + del map
+                + _ui.BtnH + Gap                     // add + del region
+                + _ui.BtnH + Gap                     // save
+                + _ui.BtnH + Gap;                    // cancel + bottom pad
+
+            // Header block: measured from actual font sizes so it never overlaps.
+            // dialogueFont at 0.65 scale, smallFont at 0.7 and 0.58 scale.
+            int titleH   = (int)(Game1.dialogueFont.MeasureString(EditorUIStrings.EditRegions).Y * 0.65f);
+            int mapKeyH  = (int)(Game1.smallFont.MeasureString("Map: X").Y * 0.7f);
+            int mapHintH = (int)(Game1.smallFont.MeasureString("X").Y * 0.58f);
+            int headerH  = titleH + mapKeyH + mapHintH + Gap * 2;
+
+            int totalAvail  = _sideArea.Height - _ui.Pad - headerH;
+            int listAvail   = Math.Max(0, totalAvail - fixedCost);
+
+            // Clamp visible rows so the list never overflows
+            int dynRows = Math.Max(1, listAvail / LocListRowH);
+            int visRows = Math.Min(dynRows, 8); // cap at 8 for readability
+
+            int locListH   = LocListRowH * visRows;
+            int scrollbarW = 10;
+
+            // ── Place controls top → bottom ───────────────────────────────────
+            int y = _sideArea.Y + _ui.Pad + headerH;
 
             // Name field
-            _nameFieldRect = new Rectangle(x, y + 20, w, 34);
-            y = _nameFieldRect.Bottom + Pad;
+            y += LabelH;
+            _nameFieldRect = new Rectangle(x, y, w, FieldH);
+            y += FieldH + Gap;
 
-            // Location dropdown + add-location button
-            int addW         = 56;
-            _locDropdownRect = new Rectangle(x, y + 20, w - addW - Pad, 34);
-            _btnAddLocRect   = new Rectangle(_locDropdownRect.Right + Pad, y + 20, addW, 34);
-            y = _locDropdownRect.Bottom + Pad;
+            // Location dropdown
+            int addW = Math.Max(50, (int)(w * 0.18f));  // ~18% of sidebar width
+            y += LabelH;
+            _locDropdownRect = new Rectangle(x, y, w - addW - _ui.Pad, FieldH);
+            _btnAddLocRect   = new Rectangle(_locDropdownRect.Right + _ui.Pad, y, addW, FieldH);
+            y += FieldH + Gap;
 
-            // Scrollable location list — LocListVisibleRows rows tall + scrollbar strip
-            int locListH          = LocListRowH * LocListVisibleRows;
-            int scrollbarW        = 10;
+            // Location list + scrollbar (same top)
+            int listTop = y;
             _locListScrollbarTrack = new Rectangle(
-                _sideArea.Right - Pad - scrollbarW, y,
+                _sideArea.Right - _ui.Pad - scrollbarW, listTop,
                 scrollbarW, locListH);
-            y += locListH + Pad;
+            y += locListH + Gap;
 
-            // Color
-            // _btnColorRect = new Rectangle(x, y, w, BtnH);
-            //y += BtnH + Pad * 2;
+            // Color button
+            _btnColorRect = new Rectangle(x, y, w, _ui.BtnH);
+            y += _ui.BtnH + Gap;
 
-            // Opacity
-            _btnColorRect = new Rectangle(x, y, w, BtnH);
-            y += BtnH + Pad;
+            // Opacity slider
+            y += LabelH;
+            _opacitySliderRect = new Rectangle(x, y, w, SliderH);
+            y += SliderH + Gap;
 
-            _opacitySliderRect = new Rectangle(
-           x,
-           y,
-           w,
-           24);
+            // Text color button
+            _btnTextColorRect = new Rectangle(x, y, w, SliderH);
+            y += SliderH + Gap;
 
-            // Text rekated
-            _btnTextColorRect = new Rectangle(x, y, w, BtnH);
-            y += BtnH + Pad;
-            y += 24 + Pad;
+            // Text scale slider
+            y += LabelH;
+            _textScaleSliderRect = new Rectangle(x, y, w, SliderH);
+            y += SliderH + Gap;
 
-            _textScaleSliderRect = new Rectangle( x, y, w, 24);
+            // Edge grab slider
+            y += LabelH;
+            _edgeGrabSliderRect = new Rectangle(x, y, w, SliderH);
+            y += SliderH + Gap * 2;
 
-            y += 24 + Pad;
-           
+            // Bind + Delete Map (side by side)
+            int half = (w - _ui.Pad) / 2;
+            _btnBindRect   = new Rectangle(x,            y, half, _ui.BtnH);
+            _btnDelMapRect = new Rectangle(x + half + _ui.Pad, y, half, _ui.BtnH);
+            y += _ui.BtnH + Gap;
 
+            // Add + Delete Region (side by side)
+            _btnAddRegionRect = new Rectangle(x,            y, half, _ui.BtnH);
+            _btnDelRegionRect = new Rectangle(x + half + _ui.Pad, y, half, _ui.BtnH);
+            y += _ui.BtnH + Gap;
 
-            _edgeGrabSliderRect = new Rectangle(x, y, w, 24);
-            y += 24 + Pad;
+            // Save
+            _btnSaveRect = new Rectangle(x, y, w, _ui.BtnH);
+            y += _ui.BtnH + Gap;
 
-            // Coord info space
-            y += 44;
+            // Cancel
+            _btnCancelRect = new Rectangle(x, y, w, _ui.BtnH);
 
-            // Bind to current map + Delete this map — side by side
-            int half2         = (w - Pad) / 2;
-            _btnBindRect      = new Rectangle(x,               y, half2, BtnH);
-            _btnDelMapRect    = new Rectangle(x + half2 + Pad, y, half2, BtnH);
-            y += BtnH + Pad;
-
-            // Add / Delete region
-            int half          = (w - Pad) / 2;
-            _btnAddRegionRect = new Rectangle(x,              y, half, BtnH);
-            _btnDelRegionRect = new Rectangle(x + half + Pad, y, half, BtnH);
-            y += BtnH + Pad * 2;
-
-            // Save / Cancel
-            _btnSaveRect   = new Rectangle(x, y, w, BtnH);
-            y += BtnH + Pad;
-            _btnCancelRect = new Rectangle(x, y, w, BtnH);
+            // Persist visible row count so draw + input use the same value
+            _dynLocListVisibleRows = visRows;
         }
+
+        // Dynamic row count computed by LayoutSidebar — used everywhere
+        // instead of the const LocListVisibleRows so it responds to screen size.
+        private int _dynLocListVisibleRows = 6;
 
         // ── Draw ──────────────────────────────────────────────────────────────
 
@@ -569,18 +669,24 @@ namespace ForageTrackerMod
                 _sideArea.Width + 8, _sideArea.Height + 8,
                 Color.White, drawShadow: false);
 
-            int tx = _sideArea.X + Pad;
-            int ty = _sideArea.Y + Pad;
+            int tx = _sideArea.X + _ui.Pad;
+            int ty = _sideArea.Y + _ui.Pad;
 
-            b.DrawString(Game1.dialogueFont, EditorUIStrings.EditRegions, new Vector2(tx, ty), Game1.textColor,
-                0f, Vector2.Zero, 0.65f, SpriteEffects.None, 1f);
+            const float titleScale  = 0.65f;
+            const float mapKeyScale = 0.70f;
+            const float hintScale   = 0.58f;
 
-            // Show which map tab is active and what it means
-            ty += 30;
-            b.DrawString(Game1.smallFont, $"{EditorUIStrings.Map} {_currentMapKey}",
+            b.DrawString(Game1.dialogueFont, EditorUIStrings.EditRegions,
                 new Vector2(tx, ty), Game1.textColor,
-                0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
-            ty += 20;
+                0f, Vector2.Zero, titleScale, SpriteEffects.None, 1f);
+            ty += (int)(Game1.dialogueFont.MeasureString(EditorUIStrings.EditRegions).Y * titleScale);
+
+            string mapKeyLine = $"{EditorUIStrings.Map} {_currentMapKey}";
+            b.DrawString(Game1.smallFont, mapKeyLine,
+                new Vector2(tx, ty), Game1.textColor,
+                0f, Vector2.Zero, mapKeyScale, SpriteEffects.None, 1f);
+            ty += (int)(Game1.smallFont.MeasureString(mapKeyLine).Y * mapKeyScale);
+
             string mapHint = _currentMapKey switch
             {
                 "Town"   => EditorUIStrings.TownMapHint,
@@ -589,7 +695,7 @@ namespace ForageTrackerMod
             };
             b.DrawString(Game1.smallFont, mapHint,
                 new Vector2(tx, ty), Game1.textColor * 0.6f,
-                0f, Vector2.Zero, 0.58f, SpriteEffects.None, 1f);
+                0f, Vector2.Zero, hintScale, SpriteEffects.None, 1f);
 
             if (_sel >= 0 && _sel < _currentRegions.Count)
             {
@@ -613,18 +719,18 @@ namespace ForageTrackerMod
                 // ── Scrollable location list ──────────────────────────────────
                 int locListX  = tx;
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListW  = _sideArea.Width - Pad * 2 - _locListScrollbarTrack.Width - 4;
-                int maxScroll = Math.Max(0, r.Locations.Count - LocListVisibleRows);
+                int locListW  = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
+                int maxScroll = Math.Max(0, r.Locations.Count - _dynLocListVisibleRows);
                 _locListScroll = Math.Clamp(_locListScroll, 0, maxScroll);
 
                 // Background for the list area
                 var listAreaRect = new Rectangle(locListX, locListY0,
                     locListW + _locListScrollbarTrack.Width + 4,
-                    LocListRowH * LocListVisibleRows);
+                    LocListRowH * _dynLocListVisibleRows);
                 b.Draw(Game1.fadeToBlackRect, listAreaRect, Color.Black * 0.25f);
 
                 // Rows
-                for (int i = 0; i < LocListVisibleRows; i++)
+                for (int i = 0; i < _dynLocListVisibleRows; i++)
                 {
                     int idx = i + _locListScroll;
                     if (idx >= r.Locations.Count) break;
@@ -642,14 +748,14 @@ namespace ForageTrackerMod
                 }
 
                 // Scrollbar
-                if (r.Locations.Count > LocListVisibleRows)
+                if (r.Locations.Count > _dynLocListVisibleRows)
                 {
                     var track = _locListScrollbarTrack;
                     track.Y = locListY0;
 
                     b.Draw(Game1.fadeToBlackRect, track, Color.Black * 0.4f);
 
-                    float thumbFrac   = (float)LocListVisibleRows / r.Locations.Count;
+                    float thumbFrac   = (float)_dynLocListVisibleRows / r.Locations.Count;
                     float thumbOffset = maxScroll > 0 ? (float)_locListScroll / maxScroll : 0f;
                     int   thumbH      = Math.Max(16, (int)(track.Height * thumbFrac));
                     int   thumbY      = track.Y + (int)((track.Height - thumbH) * thumbOffset);
@@ -660,16 +766,16 @@ namespace ForageTrackerMod
 
                     // Count hint
                     b.DrawString(Game1.smallFont,
-                        $"{_locListScroll + 1}–{Math.Min(_locListScroll + LocListVisibleRows, r.Locations.Count)}/{r.Locations.Count}",
-                        new Vector2(locListX, locListY0 + LocListRowH * LocListVisibleRows + 2),
+                        $"{_locListScroll + 1}–{Math.Min(_locListScroll + _dynLocListVisibleRows, r.Locations.Count)}/{r.Locations.Count}",
+                        new Vector2(locListX, locListY0 + LocListRowH * _dynLocListVisibleRows + 2),
                         Color.White * 0.5f, 0f, Vector2.Zero, 0.5f, SpriteEffects.None, 1f);
                 }
 
                 // Color button
                 DrawButton(b, _btnColorRect, EditorUIStrings.CycleAreaColor, Color.White);
                 b.Draw(Game1.fadeToBlackRect,
-                    new Rectangle(_btnColorRect.Right - BtnH + 4,
-                                  _btnColorRect.Y + 4, BtnH - 8, BtnH - 8),  r.Color);
+                    new Rectangle(_btnColorRect.Right - _ui.BtnH + 4,
+                                  _btnColorRect.Y + 4, _ui.BtnH - 8, _ui.BtnH - 8),  r.Color);
 
                
                 // Opacity 
@@ -718,8 +824,11 @@ namespace ForageTrackerMod
             }
             else
             {
+                // Draw the hint where the region controls would appear, so it
+                // never overlaps the header. _nameFieldRect.Y is the top of the
+                // control zone — computed dynamically by LayoutSidebar.
                 b.DrawString(Game1.smallFont, EditorUIStrings.ClickRegionHint,
-                    new Vector2(tx, _sideArea.Y + Pad + 54),
+                    new Vector2(tx, _nameFieldRect.Y),
                     Game1.textColor * 0.7f, 0f, Vector2.Zero, 0.68f, SpriteEffects.None, 1f);
             }
 
@@ -786,7 +895,7 @@ namespace ForageTrackerMod
             //EnsureSelectedTabVisible();
 
             int tabY =
-                _mapArea.Y - TabH - TabMapGap;
+                _mapArea.Y - _ui.TabH - TabMapGap;
             /*
             bool hiddenLeft =
                 _firstVisibleTab > 0;
@@ -828,9 +937,9 @@ namespace ForageTrackerMod
               _mapArea.X,
               tabY,
               TabArrowW,
-              TabH);
+              _ui.TabH);
 
-            _btnTabRightRect = new Rectangle( _mapArea.Right - newMapWw - TabArrowW - 4,  tabY, TabArrowW,  TabH);
+            _btnTabRightRect = new Rectangle( _mapArea.Right - newMapWw - TabArrowW - 4,  tabY, TabArrowW, _ui.TabH);
 
             if (hiddenLeft) DrawButton(b, _btnTabLeftRect, EditorUIStrings.LeftArrow, Color.White);
 
@@ -860,7 +969,7 @@ namespace ForageTrackerMod
                         x,
                         tabY,
                         tw,
-                        TabH);
+                        _ui.TabH);
 
                 _tabRects.Add(tabRect);
 
@@ -881,8 +990,8 @@ namespace ForageTrackerMod
 
                 int drawH =
                     active
-                    ? TabH + 2
-                    : TabH - 4;
+                    ? _ui.TabH + 2
+                    : _ui.TabH - 4;
 
                 Rectangle drawRect =
                     new Rectangle(
@@ -908,7 +1017,7 @@ namespace ForageTrackerMod
                 Vector2 labelPos =
                     new Vector2(
                         x + (tw - labelSize.X) / 2f,
-                        drawY + (TabH - labelSize.Y) / 2f);
+                        drawY + (_ui.TabH - labelSize.Y) / 2f);
 
                 b.DrawString(
                     Game1.smallFont,
@@ -928,7 +1037,7 @@ namespace ForageTrackerMod
                 _mapArea.Right - newMapWw,
                 tabY + 4,
                 newMapWw,
-                TabH - 4);
+                _ui.TabH - 4);
 
             DrawButton(
                 b,
@@ -1047,8 +1156,7 @@ namespace ForageTrackerMod
                 Color.White,
                 drawShadow: true);
 
-            string msg =
-                $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n{EditorUIStrings.ConfirmDeleteMapWarning}";
+            string msg = $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n{EditorUIStrings.ConfirmDeleteMapWarning}";
 
             b.DrawString(
                 Game1.smallFont,
@@ -1293,11 +1401,11 @@ namespace ForageTrackerMod
             if (_sel >= 0 && _sel < _currentRegions.Count)
             {
                 var r     = _currentRegions[_sel];
-                int locListX  = _sideArea.X + Pad;
+                int locListX  = _sideArea.X + _ui.Pad;
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListW  = _sideArea.Width - Pad * 2 - _locListScrollbarTrack.Width - 4;
+                int locListW  = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
 
-                for (int i = 0; i < LocListVisibleRows; i++)
+                for (int i = 0; i < _dynLocListVisibleRows; i++)
                 {
                     int idx = i + _locListScroll;
                     if (idx >= r.Locations.Count) break;
@@ -1310,7 +1418,7 @@ namespace ForageTrackerMod
                     {
                         r.Locations.RemoveAt(idx);
                         _locListScroll = Math.Clamp(_locListScroll, 0,
-                            Math.Max(0, r.Locations.Count - LocListVisibleRows));
+                            Math.Max(0, r.Locations.Count - _dynLocListVisibleRows));
                         return;
                     }
                 }
@@ -1318,13 +1426,13 @@ namespace ForageTrackerMod
                 // Scrollbar track click — jump scroll position
                 var track = _locListScrollbarTrack;
                 track.Y = locListY0;
-                if (track.Contains(x, y) && r.Locations.Count > LocListVisibleRows)
+                if (track.Contains(x, y) && r.Locations.Count > _dynLocListVisibleRows)
                 {
                     float frac = (float)(y - track.Y) / track.Height;
                     _locListScroll = (int)Math.Round(frac *
-                        Math.Max(0, r.Locations.Count - LocListVisibleRows));
+                        Math.Max(0, r.Locations.Count - _dynLocListVisibleRows));
                     _locListScroll = Math.Clamp(_locListScroll, 0,
-                        Math.Max(0, r.Locations.Count - LocListVisibleRows));
+                        Math.Max(0, r.Locations.Count - _dynLocListVisibleRows));
                     return;
                 }
             }
@@ -1389,6 +1497,7 @@ namespace ForageTrackerMod
             var r    = _currentRegions[_sel];
             float dx = (x - _dragAnchor.X) / (float)_mapArea.Width;
             float dy = (y - _dragAnchor.Y) / (float)_mapArea.Height;
+            const float MinFrac = 0.02f; // minimum region size as a fraction of map dimensions
 
             switch (_handle)
             {
@@ -1428,16 +1537,16 @@ namespace ForageTrackerMod
             {
                 var r         = _currentRegions[_sel];
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListH  = LocListRowH * LocListVisibleRows;
-                var listArea  = new Rectangle(_sideArea.X + Pad, locListY0,
-                    _sideArea.Width - Pad * 2, locListH);
+                int locListH  = LocListRowH * _dynLocListVisibleRows;
+                var listArea  = new Rectangle(_sideArea.X + _ui.Pad, locListY0,
+                    _sideArea.Width - _ui.Pad * 2, locListH);
 
                 if (listArea.Contains(mx, my))
                 {
                     _locListScroll = Math.Clamp(
                         _locListScroll - Math.Sign(direction),
                         0,
-                        Math.Max(0, r.Locations.Count - LocListVisibleRows));
+                        Math.Max(0, r.Locations.Count - _dynLocListVisibleRows));
                 }
             }
         }
@@ -1880,16 +1989,16 @@ namespace ForageTrackerMod
         {
             const float scale = 0.6f;
             var sz  = Game1.smallFont.MeasureString(text) * scale;
-            float bx = _sideArea.X + Pad;
-            float by = _btnBindRect.Y - (int)sz.Y - Pad * 2;
-            int   bw = _sideArea.Width - Pad * 2;
-            int   bh = (int)sz.Y + Pad * 2;
+            float bx = _sideArea.X + _ui.Pad;
+            float by = _btnBindRect.Y - (int)sz.Y - _ui.Pad * 2;
+            int   bw = _sideArea.Width - _ui.Pad * 2;
+            int   bh = (int)sz.Y + _ui.Pad * 2;
 
             b.Draw(Game1.fadeToBlackRect,
                 new Rectangle((int)bx - 4, (int)by - 4, bw + 8, bh + 8),
                 bgColor);
             b.DrawString(Game1.smallFont, text,
-                new Vector2(bx, by + Pad * 0.5f), textColor,
+                new Vector2(bx, by + _ui.Pad * 0.5f), textColor,
                 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
         }
 
