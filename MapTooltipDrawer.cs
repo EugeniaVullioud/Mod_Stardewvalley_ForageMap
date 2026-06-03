@@ -1,10 +1,10 @@
 using ForageTrackerModSV;
+using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
-using System.Reflection;
 
 namespace ForageTrackerMod
 {
@@ -143,11 +143,11 @@ namespace ForageTrackerMod
 
             // Rectangle mapImageRect = new Rectangle(fitX, fitY, fitW, fitH);
             LastLiveMapRect = mapImageRect;
-
+#if DEBUG
             // ── Debug overlay — draws BEFORE tooltip so tooltip is on top ─────
             // BEGIN DEBUG BLOCK — remove or set DebugMode = false to disable
-            if (DebugMode) DrawDebugOverlay(b, mapPage, mapImageRect);
-
+            if (DebugMode) MapDebugRenderer.Draw(b,Monitor,mapPage, mapImageRect, s_regionsByMap, s_bindings);
+#endif
             try
             {
                 int mouseX = Game1.getMouseX();
@@ -189,103 +189,6 @@ namespace ForageTrackerMod
         }
 
         // =========================================================================
-        // DEBUG OVERLAY
-        // Remove this entire method (and its call above) before shipping.
-        /// <summary>
-        /// Given a live SDV map key ("Town", "Island", etc.), returns the editor
-        /// tab key whose regions should be used — by looking up which tab is bound
-        /// to that live key.  Falls back to the live key itself if nothing is bound.
-        /// </summary>
-        private static string ResolveEditorKey(string liveMapKey)
-        {
-            foreach (var kv in s_bindings)
-                if (kv.Value == liveMapKey) return kv.Key;
-            return liveMapKey;
-        }
-
-        static void DrawMarker(SpriteBatch b, int x, int y, Color c)
-        {
-            b.Draw(Game1.fadeToBlackRect,
-                new Rectangle(x - 5, y - 5, 10, 10),
-                c);
-        }
-        // =========================================================================
-
-        /// <summary>
-        /// Draws on the live game map:
-        ///   • Coloured rectangles for every region in the current map key
-        ///   • The region name inside each rectangle
-        ///   • The mouse cursor's current fractional position (relX, relY)
-        ///   • The raw mapImageRect coordinates so you can compare with the editor
-        ///
-        /// This lets you verify that saved fractions match the live map positions
-        /// without needing to guess.
-        /// </summary>
-        private static void DrawDebugOverlay(SpriteBatch b, MapPage mapPage, Rectangle mapImageRect)
-        {
-            string liveKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey = ResolveEditorKey(liveKey);
-
-            int mouseX = Game1.getMouseX();
-            int mouseY = Game1.getMouseY();
-            float relX = (mouseX - mapImageRect.X) / (float)mapImageRect.Width;
-            float relY = (mouseY - mapImageRect.Y) / (float)mapImageRect.Height;
-
-            // Draw each region as a coloured rectangle
-            if (s_regionsByMap.TryGetValue(editorKey, out var regions))
-            {
-                foreach (var region in regions)
-                {
-                    // Convert fractions to screen pixels using the LIVE map rect
-                    // (same calculation as the hit-test uses)
-                    int rx = mapImageRect.X + (int)(region.Left * mapImageRect.Width);
-                    int ry = mapImageRect.Y + (int)(region.Top * mapImageRect.Height);
-                    int rw = (int)((region.Right - region.Left) * mapImageRect.Width);
-                    int rh = (int)((region.Bottom - region.Top) * mapImageRect.Height);
-                    var sr = new Rectangle(rx, ry, Math.Max(rw, 2), Math.Max(rh, 2));
-
-                    // Semi-transparent fill
-                    b.Draw(Game1.fadeToBlackRect, sr, region.Color * 0.35f);
-
-                    // Bright border
-                    DrawDebugBorder(b, sr, region.Color, 2);
-
-                    // Region name
-                    if (sr.Width > 20)
-                        b.DrawString(Game1.smallFont, region.Name,
-                            new Vector2(sr.X + 3, sr.Y + 3),
-                            Color.White, 0f, Vector2.Zero, 0.55f, SpriteEffects.None, 1f);
-                }
-            }
-
-            // Draw fractional mouse position in the top-left corner of the map
-            string debugText =
-                $"DEBUG MAP: live={liveKey}  editor={editorKey}\n" +
-                $"mapRect: x={mapImageRect.X} y={mapImageRect.Y} " +
-                $"w={mapImageRect.Width} h={mapImageRect.Height}\n" +
-                $"mouse: screen=({mouseX},{mouseY})  frac=({relX:F3},{relY:F3})";
-
-            // Dark backing
-            var textSz = Game1.smallFont.MeasureString(debugText) * 0.6f;
-            b.Draw(Game1.fadeToBlackRect,
-                new Rectangle(mapImageRect.X + 4, mapImageRect.Y + 4,
-                              (int)textSz.X + 8, (int)textSz.Y + 8),
-                Color.Black * 0.7f);
-
-            b.DrawString(Game1.smallFont, debugText,
-                new Vector2(mapImageRect.X + 8, mapImageRect.Y + 8),
-                Color.Yellow, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
-        }
-
-        private static void DrawDebugBorder(SpriteBatch b, Rectangle r, Color c, int t)
-        {
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, r.Width, t), c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Bottom - t, r.Width, t), c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, t, r.Height), c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.Right - t, r.Y, t, r.Height), c);
-        }
-
-        // =========================================================================
         // Region hit test
         // =========================================================================
 
@@ -316,17 +219,15 @@ namespace ForageTrackerMod
         /// but the fractions are relative to the image top-left in both cases, so
         /// they match.
         /// </summary>
-        private static string? GetRegionAtPoint(
-            Rectangle mapImageRect, int mouseX, int mouseY, MapPage mapPage)
+        private static string? GetRegionAtPoint( Rectangle mapImageRect, int mouseX, int mouseY, MapPage mapPage)
         {
             float relX = (mouseX - mapImageRect.X) / (float)mapImageRect.Width;
             float relY = (mouseY - mapImageRect.Y) / (float)mapImageRect.Height;
 
-            if (relX < 0f || relX > 1f || relY < 0f || relY > 1f)
-                return null;
+            if (relX < 0f || relX > 1f || relY < 0f || relY > 1f) return null;
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey = ResolveEditorKey(liveMapKey);
+            string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
             // ── Player-defined region rectangles ──────────────────────────────
             // Check these first — player rectangles take priority over vanilla points.
@@ -396,7 +297,7 @@ namespace ForageTrackerMod
             var result = new List<string>(8);
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey = ResolveEditorKey(liveMapKey);
+            string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
@@ -498,9 +399,8 @@ namespace ForageTrackerMod
             return new Rectangle((int)bx, (int)by, (int)bw, (int)bh);
         }
 
-        private static string GetMapPageHoverText(MapPage mapPage)
-        {
-            
+        static string GetMapPageHoverText(MapPage mapPage)
+        {     
             try
             {
                 return mapPage.hoverText;
@@ -766,12 +666,7 @@ namespace ForageTrackerMod
                 cy += _lineHeight;
             }
         }
-        private static float ScoreCandidate(
-    Rectangle candidate,
-    Point cursor,
-    List<Rectangle> occupiedRects,
-    int screenW,
-    int screenH)
+        private static float ScoreCandidate( Rectangle candidate, Point cursor, List<Rectangle> occupiedRects,int screenW,int screenH)
         {
             float score = 0f;
 
@@ -785,31 +680,21 @@ namespace ForageTrackerMod
 
                 if (!intersection.IsEmpty)
                 {
-                    score -=
-                        intersection.Width *
-                        intersection.Height *
-                        1000f;
+                    score -= intersection.Width * intersection.Height * 1000f;
                 }
             }
 
             // Prefer fully visible positions
-            if (candidate.Left < 0)
-                score -= 50000;
+            if (candidate.Left < 0) score -= 50000;
 
-            if (candidate.Top < 0)
-                score -= 50000;
+            if (candidate.Top < 0) score -= 50000;
 
-            if (candidate.Right > screenW)
-                score -= 50000;
+            if (candidate.Right > screenW) score -= 50000;
 
-            if (candidate.Bottom > screenH)
-                score -= 50000;
+            if (candidate.Bottom > screenH) score -= 50000;
 
             // Prefer positions near cursor
-            Point center =
-                new(
-                    candidate.Center.X,
-                    candidate.Center.Y);
+            Point center = new( candidate.Center.X, candidate.Center.Y);
 
             float dx = center.X - cursor.X;
             float dy = center.Y - cursor.Y;
@@ -820,23 +705,14 @@ namespace ForageTrackerMod
             score -= distance * 0.5f;
 
             // Small bonus for being to the right of cursor
-            if (candidate.X > cursor.X)
-                score += 250;
+            if (candidate.X > cursor.X) score += 250;
 
             // Small bonus for being below cursor
-            if (candidate.Y > cursor.Y)
-                score += 100;
+            if (candidate.Y > cursor.Y) score += 100;
 
             return score;
         }
-        private static Rectangle FindBestTooltipPosition(
-    int mouseX,
-    int mouseY,
-    int width,
-    int height,
-    List<Rectangle> occupiedRects,
-    int screenW,
-    int screenH)
+        private static Rectangle FindBestTooltipPosition( int mouseX, int mouseY, int width, int height, List<Rectangle> occupiedRects, int screenW, int screenH)
         {
             Rectangle bestRect = Rectangle.Empty;
             float bestScore = float.MinValue;
@@ -852,20 +728,9 @@ namespace ForageTrackerMod
                     int x = mouseX + (int)(Math.Cos(rad) * radius);
                     int y = mouseY + (int)(Math.Sin(rad) * radius);
 
-                    Rectangle candidate =
-                        new Rectangle(
-                            x,
-                            y,
-                            width,
-                            height);
+                    Rectangle candidate = new Rectangle( x,y, width, height);
 
-                    float score =
-                        ScoreCandidate(
-                            candidate,
-                            cursor,
-                            occupiedRects,
-                            screenW,
-                            screenH);
+                    float score =  ScoreCandidate( candidate, cursor, occupiedRects, screenW,screenH);
 
                     if (score > bestScore)
                     {
@@ -877,24 +742,12 @@ namespace ForageTrackerMod
 
             if (bestRect == Rectangle.Empty)
             {
-                bestRect = new Rectangle(
-                    mouseX + 48,
-                    mouseY + 48,
-                    width,
-                    height);
+                bestRect = new Rectangle( mouseX + 48, mouseY + 48, width, height);
             }
 
-            bestRect.X =
-                Math.Clamp(
-                    bestRect.X,
-                    0,
-                    screenW - width);
+            bestRect.X = Math.Clamp( bestRect.X, 0,screenW - width);
 
-            bestRect.Y =
-                Math.Clamp(
-                    bestRect.Y,
-                    0,
-                    screenH - height);
+            bestRect.Y = Math.Clamp(bestRect.Y,0,screenH - height);
 
             return bestRect;
         }
@@ -915,8 +768,7 @@ namespace ForageTrackerMod
             }
 
             if (icon == null) return;
-            b.Draw(icon.Texture, position, icon.SourceRect,
-                Color.White, 0f, Vector2.Zero, _spriteScale, SpriteEffects.None, 1f);
+            b.Draw(icon.Texture, position, icon.SourceRect, Color.White, 0f, Vector2.Zero, _spriteScale, SpriteEffects.None, 1f);
         }
     }
 }
