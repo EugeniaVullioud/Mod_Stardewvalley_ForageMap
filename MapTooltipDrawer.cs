@@ -89,6 +89,19 @@ namespace ForageTrackerMod
         // ── Location key cache ────────────────────────────────────────────────
         static readonly Dictionary<string, string> s_lowercaseKeyCache = new();
 
+        // ── Tooltip positioner cache keys ─────────────────────────────────────
+        static int _lastBoxW = -1;
+        static int _lastBoxH = -1;
+#if DEBUG
+        // ── Performance debug ─────────────────────────────────────────────────
+        // Measures elapsed time per OnRenderedActiveMenu call.
+        // Logs a rolling average every 60 frames when DebugMode is on.
+        static readonly System.Diagnostics.Stopwatch _perfWatch    = new();
+        static long  _perfTotalUs    = 0;
+        static int   _perfFrameCount = 0;
+        static int   _perfSpiralRuns = 0;
+        const  int   PerfLogInterval = 60;
+#endif
         // =========================================================================
         // Public entry point
         // =========================================================================
@@ -102,37 +115,10 @@ namespace ForageTrackerMod
             if (gameMenu.GetCurrentPage() is not MapPage mapPage) return;
             if (!MapRenderUtility.TryGetMapRenderData(mapPage, out var rd)) return;
 
+#if DEBUG
+            _perfWatch.Restart();
+#endif
             Rectangle mapImageRect = rd.DestinationRect;
-
-            // ── Compute the map image rect ────────────────────────────────────
-            //
-            // In SDV 1.6, MapPage stretches the world map to fill its entire
-            // bounds with no letterboxing. The page bounds are (e.g.) 890×680,
-            // which is NOT the native 1360×720 aspect ratio.
-            //
-            // The editor computes region fractions by letterboxing 1360×720 into
-            // its panel space. To keep fractions consistent we must do the same
-            // here: derive a rect with the native 1360:720 aspect ratio fitted
-            // inside the MapPage bounds, centred.
-            //
-            // This is the SAME calculation the editor uses, applied to the live
-            // MapPage bounds instead of the editor panel — so both sides evaluate
-            // fractions against the same relative coordinate space.
-            const int NativeMapW = 1360;
-            const int NativeMapH = 720;
-
-            int pageW = mapPage.width;
-            int pageH = mapPage.height;
-            if (pageW <= 0 || pageH <= 0) return;
-
-            float scaleX = (float)pageW / NativeMapW;
-            float scaleY = (float)pageH / NativeMapH;
-            float fitScale = Math.Min(scaleX, scaleY);
-
-            int fitW = (int)(NativeMapW * fitScale);
-            int fitH = (int)(NativeMapH * fitScale);
-            int fitX = mapPage.xPositionOnScreen + (pageW - fitW) / 2;
-            int fitY = mapPage.yPositionOnScreen + (pageH - fitH) / 2;
 
             // Rectangle mapImageRect = new Rectangle(fitX, fitY, fitW, fitH);
             LastLiveMapRect = mapImageRect;
@@ -178,6 +164,27 @@ namespace ForageTrackerMod
             {
                 Debugger.DebugLog(Monitor, $"[MapTooltipDrawer] Draw error: {ex}", LogLevel.Error);
             }
+#if DEBUG
+            finally
+            {
+                _perfWatch.Stop();
+                _perfTotalUs    += _perfWatch.ElapsedTicks * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
+                _perfFrameCount++;
+
+                if (_perfFrameCount >= PerfLogInterval)
+                {
+                    float avgUs     = (float)_perfTotalUs / _perfFrameCount;
+                    float avgMs     = avgUs / 1000f;
+                    int   spirals   = _perfSpiralRuns;
+
+                    Debugger.DebugLog(Monitor, $"[TooltipPerf] avg {avgMs:F3} ms/frame over {_perfFrameCount} frames | " +
+                        $"spiral re-solves: {spirals} / {_perfFrameCount}", LogLevel.Debug);
+                    _perfTotalUs    = 0;
+                    _perfFrameCount = 0;
+                    _perfSpiralRuns = 0;
+                }
+            }
+#endif
         }
 
         // =========================================================================
@@ -221,8 +228,24 @@ namespace ForageTrackerMod
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
             string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
+            // ── Vanilla mapPage.points — checked FIRST for building interiors ──
+            // If the cursor is over a named location point we check immediately:
+            //   • If it is a building interior with forage → return it standalone
+            //     so the building shows only its own forage, not the parent region.
+            //   • Otherwise fall through to player-defined regions below.
+            var points = MapPageCompat.GetPoints(mapPage);
+            foreach (var point in points)
+            {
+                if (!point.containsPoint(mouseX, mouseY)) continue;
+                string pName = point.name;
+
+                // Only intercept building interiors — they must show their own
+                // forage exclusively, even if they sit inside a user region.
+                if (IsStandaloneInterior(pName) && Tracker != null && Tracker.IsTracked(pName))
+                    return VanillaFallbackPrefix + pName;
+            }
+
             // ── Player-defined region rectangles ──────────────────────────────
-            // Check these first — player rectangles take priority over vanilla points.
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
                 foreach (var region in regions)
@@ -233,13 +256,8 @@ namespace ForageTrackerMod
                 }
             }
 
-            // ── Vanilla mapPage.points fallback ───────────────────────────────
-            // mapPage.points contains named clickable spots for landmarks like
-            // the Quarry entrance, Carpenter Shop, etc. If the cursor is over
-            // one of these AND the tracker has forage data for that location,
-            // show it even without a player-defined region rectangle.
-            // The component .name is the internal location name in most cases.
-            var points = MapPageCompat.GetPoints(mapPage);
+            // ── Vanilla mapPage.points fallback (non-interior) ────────────────
+            // Non-interior vanilla points: Quarry, Carpenter Shop, etc.
             foreach (var point in points)
             {
                 if (!point.containsPoint(mouseX, mouseY))  continue;
@@ -287,8 +305,20 @@ namespace ForageTrackerMod
         {
             var result = new List<string>(8);
 
+            // ── Vanilla point (no user region) ────────────────────────────────
+            // The regionName IS the location name. If it is a building interior
+            // we show only that interior's forage — never the outer area's data.
+            // This is already handled: result contains only the interior name,
+            // and MergeSummaries will return nothing if it has no forage.
+            if (regionName.StartsWith(VanillaFallbackPrefix, StringComparison.Ordinal))
+            {
+                result.Add(regionName[VanillaFallbackPrefix.Length..]);
+                return result;
+            }
+
+            // ── User-defined region ───────────────────────────────────────────
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
+            string editorKey  = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
@@ -297,6 +327,11 @@ namespace ForageTrackerMod
 
                 if (region != null)
                 {
+                    // Filter out building interiors that are hovered as vanilla
+                    // points — they have their own hover path above and should
+                    // not bleed forage into the parent region tooltip.
+                    // Only exclude them if the mouse is directly over a vanilla
+                    // point for that location (checked in GetRegionAtPoint first).
                     result.AddRange(region.Locations);
                     return result;
                 }
@@ -304,6 +339,23 @@ namespace ForageTrackerMod
 
             result.Add(regionName);
             return result;
+        }
+
+        /// <summary>
+        /// Returns true if locationName corresponds to a building interior
+        /// that has its own vanilla map hover point — meaning it should be
+        /// shown standalone, not merged into a parent region.
+        /// </summary>
+        static bool IsStandaloneInterior(string locationName)
+        {
+            // Building interiors that SDV surfaces on the world map as hover
+            // points are: FarmHouse, Cellar, and (optionally) Greenhouse.
+            // In practice, mapPage.points already handles this — if we reach
+            // GetRegionAtPoint and a vanilla point is hit first, we never
+            // enter a region check. This method is a guard for MergeSummaries.
+            return locationName is "FarmHouse" or "Cellar" or "Greenhouse"
+                                or "IslandFarmHouse" or "BathHousePool"
+                                or "BathHouseEntry" or "BathHouseLocker";
         }
 
         static Dictionary<string, ForageTracker.SummaryEntry> MergeSummaries(List<string> locationNames)
@@ -424,16 +476,32 @@ namespace ForageTrackerMod
 
             string hoverText = MapPageCompat.GetHoverText(mapPage);
 
-            var occupiedRects = new List<Rectangle>();
+            Rectangle vanillaRect = GetVanillaHoverRect(hoverText, mouseX, mouseY);
 
-            Rectangle vanillaRect = GetVanillaHoverRect( hoverText, mouseX, mouseY);
+            if ((int)boxW != _lastBoxW || (int)boxH != _lastBoxH)
+            {
+                TooltipPositioner.Invalidate();
+                _lastBoxW = (int)boxW;
+                _lastBoxH = (int)boxH;
+            }
 
-            if (!vanillaRect.IsEmpty) occupiedRects.Add(vanillaRect);
+#if DEBUG
+            int spiralsBefore = TooltipPositioner.SpiralRunCount;
+#endif
 
-            Rectangle tooltipRect = FindBestTooltipPosition( mouseX, mouseY,(int)boxW, (int)boxH, occupiedRects, Game1.uiViewport.Width, Game1.uiViewport.Height);
+            Point pos = TooltipPositioner.GetPosition(
+                mouseX, mouseY,
+                (int)boxW, (int)boxH,
+                vanillaRect,
+                Game1.uiViewport.Width, Game1.uiViewport.Height,
+                _cachedUiScale);
 
-            float finalX = tooltipRect.X;
-            float finalY = tooltipRect.Y;
+#if DEBUG
+            if (TooltipPositioner.SpiralRunCount != spiralsBefore) _perfSpiralRuns++;
+#endif
+
+            float finalX = pos.X;
+            float finalY = pos.Y;
 
             // ── Draw ──────────────────────────────────────────────────────────
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
@@ -463,87 +531,7 @@ namespace ForageTrackerMod
                 cy += _lineHeight;
             }
         }
-        static float ScoreCandidate( Rectangle candidate, Point cursor, List<Rectangle> occupiedRects,int screenW,int screenH)
-        {
-            float score = 0f;
-
-            // Huge penalty for overlap
-            foreach (Rectangle occupied in occupiedRects)
-            {
-                Rectangle intersection = Rectangle.Intersect(candidate,occupied);
-
-                if (!intersection.IsEmpty)
-                {
-                    score -= intersection.Width * intersection.Height * 1000f;
-                }
-            }
-
-            // Prefer fully visible positions
-            if (candidate.Left < 0) score -= 50000;
-
-            if (candidate.Top < 0) score -= 50000;
-
-            if (candidate.Right > screenW) score -= 50000;
-
-            if (candidate.Bottom > screenH) score -= 50000;
-
-            // Prefer positions near cursor
-            Point center = new( candidate.Center.X, candidate.Center.Y);
-
-            float dx = center.X - cursor.X;
-            float dy = center.Y - cursor.Y;
-
-            float distance =  MathF.Sqrt(dx * dx + dy * dy);
-
-            score -= distance * 0.5f;
-
-            // Small bonus for being to the right of cursor
-            if (candidate.X > cursor.X) score += 250;
-
-            // Small bonus for being below cursor
-            if (candidate.Y > cursor.Y) score += 100;
-
-            return score;
-        }
-        static Rectangle FindBestTooltipPosition( int mouseX, int mouseY, int width, int height, List<Rectangle> occupiedRects, int screenW, int screenH)
-        {
-            Rectangle bestRect = Rectangle.Empty;
-            float bestScore = float.MinValue;
-
-            Point cursor = new(mouseX, mouseY);
-
-            for (int radius = 48; radius <= 600; radius += 24)
-            {
-                for (int angle = 0; angle < 360; angle += 10)
-                {
-                    float rad = MathHelper.ToRadians(angle);
-
-                    int x = mouseX + (int)(Math.Cos(rad) * radius);
-                    int y = mouseY + (int)(Math.Sin(rad) * radius);
-
-                    Rectangle candidate = new Rectangle( x,y, width, height);
-
-                    float score =  ScoreCandidate( candidate, cursor, occupiedRects, screenW,screenH);
-
-                    if (score > bestScore)
-                    {
-                        bestScore = score;
-                        bestRect = candidate;
-                    }
-                }
-            }
-
-            if (bestRect == Rectangle.Empty)
-            {
-                bestRect = new Rectangle( mouseX + 48, mouseY + 48, width, height);
-            }
-
-            bestRect.X = Math.Clamp( bestRect.X, 0,screenW - width);
-
-            bestRect.Y = Math.Clamp(bestRect.Y,0,screenH - height);
-
-            return bestRect;
-        }
+        // Spiral search and scoring delegated to TooltipPositioner.cs
         static void TryDrawItemIcon(SpriteBatch b, string itemId, Vector2 position)
         {
             if (!s_iconCache.TryGetValue(itemId, out var icon))
