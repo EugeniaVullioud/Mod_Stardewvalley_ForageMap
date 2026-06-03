@@ -1,8 +1,7 @@
+using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewValley;
-using StardewValley.Buildings;
-using System.Collections.Generic;
 using SObject = StardewValley.Object;
 
 namespace ForageTrackerMod
@@ -105,10 +104,7 @@ namespace ForageTrackerMod
                 _data[location.Name] = ld;
                 total += ld.Entries.Count;
             }
-
-            _monitor.Log(
-                $"[ForageTracker] Day scan: {total} forageable(s) across {_data.Count} location(s).",
-                LogLevel.Debug);
+            Debugger.DebugLog(_monitor, $"[ForageTracker] Day scan: {total} forageable(s) across {_data.Count} location(s).", LogLevel.Debug);
         }
 
         /// <summary>
@@ -124,9 +120,7 @@ namespace ForageTrackerMod
             entry.Picked = true;
             ld.RebuildSummary();   // O(n entries in this location) — only on actual pickup
 
-            _monitor.Log(
-                $"[ForageTracker] Picked: {entry.DisplayName} @ {tile} in {locationName}.",
-                LogLevel.Trace);
+            Debugger.DebugLog(_monitor, $"[ForageTracker] Picked: {entry.DisplayName} @ {tile} in {locationName}.", LogLevel.Trace);
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
-﻿using ForageTrackerMod;
+﻿#if DEBUG
+using ForageTrackerMod;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
@@ -7,6 +8,48 @@ using StardewValley.Menus;
 
 namespace ForageTrackerModSV.Debug
 {
+    /// <summary>
+    /// Provides compile-time stripped logging helpers for debug-only output.
+    ///
+    /// Purpose:
+    /// This class centralizes debug logging so that log calls can be written
+    /// normally in code without manually wrapping them in #if DEBUG blocks.
+    ///
+    /// Behavior:
+    /// • When compiled in DEBUG mode, log calls are executed normally.
+    /// • When compiled in RELEASE mode, calls to this method are completely
+    ///   removed by the compiler due to the [Conditional("DEBUG")] attribute.
+    /// • No runtime overhead exists in release builds (no string evaluation,
+    ///   no method invocation).
+    ///
+    /// This makes it safe to leave extensive debugging logs in the codebase
+    /// without affecting production performance or log output.
+    /// </summary>
+    public static class Debugger
+    {
+        [System.Diagnostics.Conditional("DEBUG")]
+        /// <summary>
+        /// Writes a log message using SMAPI's monitor system.
+        ///
+        /// This method is compiled out in non-DEBUG builds due to the
+        /// [Conditional("DEBUG")] attribute.
+        ///
+        /// In DEBUG builds:
+        /// • The message is logged using the provided IMonitor instance.
+        /// • The specified log level is respected.
+        ///
+        /// In RELEASE builds:
+        /// • Calls to this method are removed at compile time.
+        /// • No code or string evaluation is executed.
+        /// </summary>
+        /// <param name="Monitor">The SMAPI monitor used for logging output.</param>
+        /// <param name="message">The message to log.</param>
+        /// <param name="level">The SMAPI log level (Trace, Debug, Info, etc.).</param>
+        public static void DebugLog(IMonitor Monitor, string message, LogLevel level)
+        {
+            Monitor?.Log(message, level);
+        }
+    }
     /// <summary>
     /// Debug-only renderer used to visualize map region data directly on the
     /// live Stardew Valley map page.
@@ -69,7 +112,7 @@ namespace ForageTrackerModSV.Debug
         {
             if (b == null || mapPage == null)
             {
-                monitor?.Log($"[Warning] Misssing key parameters for debug to work.", LogLevel.Trace);
+                Debugger.DebugLog(monitor, $"[Warning] Misssing key parameters for debug to work.", LogLevel.Trace);
                 return;              
             }
 
@@ -185,3 +228,4 @@ namespace ForageTrackerModSV.Debug
         }
     }
 }
+#endif

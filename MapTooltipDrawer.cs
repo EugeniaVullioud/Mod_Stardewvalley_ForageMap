@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+
 #if DEBUG
 using ForageTrackerModSV.Debug;
 #endif
@@ -151,14 +152,14 @@ namespace ForageTrackerMod
                 var locationNames = ResolveLocationNames(regionName, mapPage);
                 if (locationNames.Count == 0)
                 {
-                    Monitor?.Log($"[Tooltip] Region '{regionName}' has no locations declared.", LogLevel.Trace);
+                    Debugger.DebugLog(Monitor, $"[Tooltip] Region '{regionName}' has no locations declared.", LogLevel.Trace);
                     return;
                 }
 
                 var merged = MergeSummaries(locationNames);
                 if (merged.Count == 0)
                 {
-                    Monitor?.Log($"[Tooltip] Region '{regionName}' has no forage today.", LogLevel.Trace);
+                    Debugger.DebugLog(Monitor, $"[Tooltip] Region '{regionName}' has no forage today.", LogLevel.Trace);
                     return;
                 }
 
@@ -175,7 +176,7 @@ namespace ForageTrackerMod
             }
             catch (Exception ex)
             {
-                Monitor?.Log($"[MapTooltipDrawer] Draw error: {ex}", LogLevel.Error);
+                Debugger.DebugLog(Monitor, $"[MapTooltipDrawer] Draw error: {ex}", LogLevel.Error);
             }
         }
 

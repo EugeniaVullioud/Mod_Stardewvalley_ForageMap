@@ -1,4 +1,5 @@
 using ForageTrackerModSV;
+using ForageTrackerModSV.Debug;
 using LightRadiusMod;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -66,9 +67,7 @@ namespace ForageTrackerMod
             helper.Events.Input.ButtonPressed += OnButtonPressed;
 
             SetEnabled(_config.Enabled);
-#if DEBUG
-            Monitor.Log($"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).",LogLevel.Info);
-#endif
+            Debugger.DebugLog(Monitor, $"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).", LogLevel.Info);
         }
 
         // ── Enabled state — subscribe/unsubscribe pattern ────────────────────────
@@ -81,19 +80,14 @@ namespace ForageTrackerMod
             {
                 Helper.Events.GameLoop.DayStarted += OnDayStarted;
                 Helper.Events.World.ObjectListChanged += OnObjectListChanged;
-#if DEBUG
-                Monitor.Log("[ForageTracker] Tracking activated.", LogLevel.Debug);
-#endif
+                Debugger.DebugLog(Monitor, "[ForageTracker] Tracking activated.", LogLevel.Debug);
 
             }
             else
             {
                 Helper.Events.GameLoop.DayStarted -= OnDayStarted;
                 Helper.Events.World.ObjectListChanged -= OnObjectListChanged;
-#if DEBUG
-
-                Monitor.Log("[ForageTracker] Tracking deactivated.", LogLevel.Debug);
-#endif
+                Debugger.DebugLog(Monitor, "[ForageTracker] Tracking deactivated.", LogLevel.Debug);
             }
 
             _active = enable;
@@ -160,9 +154,7 @@ namespace ForageTrackerMod
             {
                 if (!obj.IsSpawnedObject) continue;
                 _tracker.MarkPicked(e.Location.Name, tile);
-#if DEBUG
-                Monitor.Log($"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Trace);
-#endif
+                Debugger.DebugLog(Monitor, $"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Trace);
             }
         }
 
@@ -221,9 +213,7 @@ namespace ForageTrackerMod
                     Helper.Data.WriteJsonFile("regions.json", saved);
                     MapTooltipDrawer.SetRegionsByMap(saved.RegionsByMap);
                     MapTooltipDrawer.SetBindings(saved.Bindings);
-#if DEBUG
-                    Monitor.Log("[ForageTracker] Regions saved.", LogLevel.Info);
-#endif
+                    Debugger.DebugLog(Monitor, "[ForageTracker] Regions saved.", LogLevel.Info);
                 });
         }
 
@@ -235,9 +225,7 @@ namespace ForageTrackerMod
 
             if (gmcm == null)
             {
-#if DEBUG
-                Monitor.Log("GMCM not found – in-game config unavailable.", LogLevel.Debug);
-#endif
+                Debugger.DebugLog(Monitor, "GMCM not found – in-game config unavailable.", LogLevel.Debug);
                 return;
             }
 
@@ -366,9 +354,7 @@ namespace ForageTrackerMod
 
                 height: () => 76
             );
-#if DEBUG
-            Monitor.Log("GMCM registered.", LogLevel.Debug);
-#endif
+            Debugger.DebugLog(Monitor, "GMCM registered.", LogLevel.Debug);
         }
 
         static char GetCharFromKey(Keys key)
