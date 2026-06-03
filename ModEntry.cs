@@ -1,3 +1,4 @@
+using ForageTrackerModSV;
 using LightRadiusMod;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -65,10 +66,9 @@ namespace ForageTrackerMod
             helper.Events.Input.ButtonPressed += OnButtonPressed;
 
             SetEnabled(_config.Enabled);
-
-            Monitor.Log(
-                $"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).",
-                LogLevel.Info);
+#if DEBUG
+            Monitor.Log($"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).",LogLevel.Info);
+#endif
         }
 
         // ── Enabled state — subscribe/unsubscribe pattern ────────────────────────
@@ -81,13 +81,19 @@ namespace ForageTrackerMod
             {
                 Helper.Events.GameLoop.DayStarted += OnDayStarted;
                 Helper.Events.World.ObjectListChanged += OnObjectListChanged;
+#if DEBUG
                 Monitor.Log("[ForageTracker] Tracking activated.", LogLevel.Debug);
+#endif
+
             }
             else
             {
                 Helper.Events.GameLoop.DayStarted -= OnDayStarted;
                 Helper.Events.World.ObjectListChanged -= OnObjectListChanged;
+#if DEBUG
+
                 Monitor.Log("[ForageTracker] Tracking deactivated.", LogLevel.Debug);
+#endif
             }
 
             _active = enable;
@@ -154,9 +160,9 @@ namespace ForageTrackerMod
             {
                 if (!obj.IsSpawnedObject) continue;
                 _tracker.MarkPicked(e.Location.Name, tile);
-                Monitor.Log(
-                    $"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}",
-                    LogLevel.Trace);
+#if DEBUG
+                Monitor.Log($"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Trace);
+#endif
             }
         }
 
@@ -203,7 +209,7 @@ namespace ForageTrackerMod
             OpenEditorNow();
         }
 
-        private void OpenEditorNow()
+        void OpenEditorNow()
         {
             Game1.activeClickableMenu = new MapRegionEditor(
                 Helper,
@@ -215,20 +221,23 @@ namespace ForageTrackerMod
                     Helper.Data.WriteJsonFile("regions.json", saved);
                     MapTooltipDrawer.SetRegionsByMap(saved.RegionsByMap);
                     MapTooltipDrawer.SetBindings(saved.Bindings);
+#if DEBUG
                     Monitor.Log("[ForageTracker] Regions saved.", LogLevel.Info);
+#endif
                 });
         }
 
         // ── GMCM registration ────────────────────────────────────────────────────
 
-        private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
+        void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
-            var gmcm = Helper.ModRegistry.GetApi<IGenericModConfigMenuApi>(
-                "spacechase0.GenericModConfigMenu");
+            var gmcm = Helper.ModRegistry.GetApi<IGenericModConfigMenuApi>("spacechase0.GenericModConfigMenu");
 
             if (gmcm == null)
             {
+#if DEBUG
                 Monitor.Log("GMCM not found – in-game config unavailable.", LogLevel.Debug);
+#endif
                 return;
             }
 
@@ -239,37 +248,37 @@ namespace ForageTrackerMod
 
             gmcm.AddBoolOption(
                 mod: ModManifest,
-                name: () => "Enable Forage Tracker",
-                tooltip: () => "Track and display daily forageable counts on the map tooltip.",
+                name: () => ModEntryUIStrings.EnabledStatus,
+                tooltip: () => ModEntryUIStrings.EnabledStatusTooltip,
                 getValue: () => _config.Enabled,
                 setValue: v => { _config.Enabled = v; SetEnabled(v); });
 
             gmcm.AddTextOption(
                 mod: ModManifest,
-                name: () => "Display Mode",
-                tooltip: () => "What to show per entry: icon + name, icon + count only, or text only.",
+                name: () => ModEntryUIStrings.Display,
+                tooltip: () => ModEntryUIStrings.DisplayTooltip,
                 getValue: () => _config.Display.ToString(),
                 setValue: v => _config.Display = Enum.Parse<DisplayMode>(v),
-                allowedValues: new[] { "Both", "IconOnly", "TextOnly" },
+                allowedValues: new[] { ModEntryUIStrings.IconOptionBothDropdown, ModEntryUIStrings.IconOptionIconOnlyDropdown, ModEntryUIStrings.IconOptionTextOnlyDropdown },
                 formatAllowedValue: v => v switch
                 {
-                    "Both" => "Icon + Text",
-                    "IconOnly" => "Icon Only",
-                    "TextOnly" => "Text Only",
+                    ModEntryUIStrings.IconOptionBothDropdown => ModEntryUIStrings.IconOptionBoth,
+                    ModEntryUIStrings.IconOptionIconOnlyDropdown => ModEntryUIStrings.IconOptionIconOnly,
+                    ModEntryUIStrings.IconOptionTextOnlyDropdown => ModEntryUIStrings.IconOptionTextOnly,
                     _ => v
                 });
 
             gmcm.AddBoolOption(
                 mod: ModManifest,
-                name: () => "Show Remaining Only",
-                tooltip: () => "ON = hide fully-collected items. OFF = always show with remaining / total.",
+                name: () => ModEntryUIStrings.Amount,
+                tooltip: () => ModEntryUIStrings.AmountTooltip,
                 getValue: () => _config.ShowRemainingOnly,
                 setValue: v => _config.ShowRemainingOnly = v);
 
             gmcm.AddNumberOption(
                 mod: ModManifest,
-                name: () => "Icon Scale",
-                tooltip: () => "Icon size multiplier (1.0 = default).",
+                name: () => ModEntryUIStrings.IconScale,
+                tooltip: () => ModEntryUIStrings.IconScaleTooltip,
                 getValue: () => _config.IconScale,
                 setValue: v => _config.IconScale = v,
                 min: 0.5f, max: 3.0f, interval: 0.25f);
@@ -281,9 +290,9 @@ namespace ForageTrackerMod
             gmcm.AddComplexOption(
                 mod: ModManifest,
 
-                name: () => "Region Editor",
+                name: () => ModEntryUIStrings.Editor,
 
-                tooltip: () => "Open the forage region editor.",
+                tooltip: () => ModEntryUIStrings.EditorTooltip,
 
                 beforeMenuOpened: () =>
                 {
@@ -334,7 +343,7 @@ namespace ForageTrackerMod
 
                     Utility.drawTextWithShadow(
                         spriteBatch,
-                        "Edit Regions",
+                        ModEntryUIStrings.EditRegions,
                         Game1.dialogueFont,
                         new Vector2(rect.X + 22, rect.Y + 16),
                         hover ? Color.DarkRed : Game1.textColor
@@ -357,10 +366,12 @@ namespace ForageTrackerMod
 
                 height: () => 76
             );
+#if DEBUG
             Monitor.Log("GMCM registered.", LogLevel.Debug);
+#endif
         }
 
-        private static char GetCharFromKey(Keys key)
+        static char GetCharFromKey(Keys key)
         {
             bool shift =
                 Game1.input.GetKeyboardState().IsKeyDown(Keys.LeftShift) ||

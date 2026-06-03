@@ -1,19 +1,56 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace ForageTrackerModSV
+﻿namespace ForageTrackerModSV
 {
+    /// <summary>
+    /// Centralized UI string definitions for the mod entry configuration screens.
+    /// These strings are used in configuration menus, toggles, tooltips and general UI labels.
+    /// Designed to support future localization by keeping all user-facing text in one place.
+    /// </summary>
+    internal static class ModEntryUIStrings
+    {
+        // ── General ──────────────────────────────────
+        public const string Editor = "Region Editor";
+        public const string EditorTooltip = "Open the forage region editor.";
+        public const string EditRegions = "Edit Regions";
+
+        // ==================================================
+        // INSIDE OWN CONFIG
+        // ==================================================
+        public const string EnabledStatus = "Enable Forage Tracker";
+        public const string EnabledStatusTooltip = "Track and display daily forageable counts on the map tooltip.";
+
+        public const string Display = "Display Mode";
+        public const string DisplayTooltip = "What to show per entry: icon + name, icon + count only, or text only.";
+
+        // ── Icons ──────────────────────────────────
+        public const string IconScale = "Icon Scale";
+        public const string IconScaleTooltip = "Icon size multiplier (1.0 = default).";
+        public const string IconOptionBoth = "Icon + Text";
+        public const string IconOptionIconOnly = "Icon Only";
+        public const string IconOptionTextOnly = "Text Only";
+        public const string IconOptionBothDropdown = "Both";
+        public const string IconOptionIconOnlyDropdown = "IconOnly";
+        public const string IconOptionTextOnlyDropdown = "TextOnly";
+
+        // ── Amount ──────────────────────────────────
+        public const string Amount = "Show Remaining Only";
+        public const string AmountTooltip = "ON = hide fully-collected items. OFF = always show with remaining / total";
+
+    }
+    /// <summary>
+    /// UI strings used for small HUD / overlay elements related to forage display.
+    /// Typically shown in the in-game UI rather than configuration menus.
+    /// </summary>
     internal static class DrawerUIStrings
     {
         public const string Forage = "Forage today:";
-
     }
+    /// <summary>
+    /// UI strings used exclusively in the in-game region editor interface.
+    /// Includes map selection, region creation tools, dialogs and editor status messages.
+    /// </summary>
     internal static class EditorUIStrings
     {
-        // ================
+        // ==================================================
         // EDITOR - MAIN
         // ==================================================
         public const string NewMap = "+ New Map";
