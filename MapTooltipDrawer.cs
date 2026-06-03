@@ -75,9 +75,16 @@ namespace ForageTrackerMod
         private static float _textScale;
         private static float _headerHeight;
 
+        // Prefix for synthetic region names created from vanilla map hover-points.
+        // Stripped before display; used to route resolution in ResolveLocationNames.
+        private const string VanillaFallbackPrefix = "__vanilla__";
+
         // ── Pre-allocated line buffer ─────────────────────────────────────────
 
         private static readonly List<(string ItemId, string Label)> s_lineBuffer = new(16);
+
+        // Set just before DrawForageSummary so MeasureVanillaBannerRect has the label.
+        private static string _lastDisplayName = string.Empty;
 
         // ── Location key cache ────────────────────────────────────────────────
 
@@ -163,9 +170,17 @@ namespace ForageTrackerMod
                     return;
                 }
 
+                // Strip the internal vanilla-fallback prefix for display.
+                string displayName = regionName.StartsWith(VanillaFallbackPrefix, StringComparison.Ordinal)
+                    ? regionName[VanillaFallbackPrefix.Length..]
+                    : regionName;
+
                 RefreshScaleCache();
-                float vanillaH = MeasureVanillaTooltipHeight(regionName);
-                DrawForageSummary(b, mouseX, mouseY, vanillaH, merged);
+                _lastDisplayName = displayName;
+                float vanillaH = Game1.dialogueFont.MeasureString(displayName).Y
+                                 + 16f * _cachedUiScale;
+               // DrawForageSummary(b, mouseX, mouseY, vanillaH, merged);
+                DrawForageSummary(b, mouseX, mouseY, mapPage, merged);
             }
             catch (Exception ex)
             {
@@ -453,15 +468,213 @@ namespace ForageTrackerMod
         // Drawing
         // =========================================================================
 
-        private static float MeasureVanillaTooltipHeight(string areaLabel)
+        /// <summary>
+        /// Measures the rectangle SDV's own hover banner occupies so we can avoid it.
+        /// SDV draws the banner centred above the mouse; its height is one dialogue-font
+        /// line plus the menu-texture border padding (8px top + 8px bottom at scale 1).
+        /// Everything is multiplied by uiScale so it works at any display size.
+        /// </summary>
+        private static Rectangle MeasureVanillaBannerRect(string areaLabel, int mouseX, int mouseY)
         {
-            float titleH = Game1.dialogueFont.MeasureString(areaLabel).Y;
-            return titleH + 32f * _cachedUiScale + 8f * _cachedUiScale;
+            // SDV measures the banner with dialogueFont and adds a fixed border.
+            // The border is 8px each side in the source texture, scaled by uiScale.
+            float border = 8f * _cachedUiScale;
+            var   sz     = Game1.dialogueFont.MeasureString(areaLabel);
+            float bw     = sz.X + border * 4f;          // SDV adds ~2× border each side
+            float bh     = sz.Y + border * 2f;
+
+            // SDV centres the banner horizontally on the mouse and places it
+            // just above the cursor (cursor is ~48px tall at scale 1).
+            float cursorH = 48f * _cachedUiScale;
+            float bx      = mouseX - bw / 2f;
+            float by      = mouseY - cursorH - bh;
+
+            // Clamp to screen so our avoidance rect is accurate.
+            float sw = Game1.uiViewport.Width;
+            float sh = Game1.uiViewport.Height;
+            bx = Math.Clamp(bx, 0, sw - bw);
+            by = Math.Clamp(by, 0, sh - bh);
+
+            return new Rectangle((int)bx, (int)by, (int)bw, (int)bh);
         }
 
-        private static void DrawForageSummary(
-            SpriteBatch b, int mouseX, int mouseY, float vanillaH,
-            Dictionary<string, ForageTracker.SummaryEntry> summary)
+        private static string GetMapPageHoverText(MapPage mapPage)
+        {
+            
+            try
+            {
+                return mapPage.hoverText;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static Rectangle GetVanillaHoverRect( string hoverText, int mouseX, int mouseY)
+        {
+            if (string.IsNullOrEmpty(hoverText))
+                return Rectangle.Empty;
+
+            float uiScale = Game1.options.uiScale;
+
+            Vector2 size = Game1.smallFont.MeasureString(hoverText);
+
+            int width =
+                (int)size.X +
+                (int)(32 * uiScale);
+
+            int height =
+                (int)size.Y +
+                (int)(32 * uiScale);
+
+            int x = mouseX + 32;
+            int y = mouseY + 32;
+
+            if (x + width > Game1.uiViewport.Width)
+                x = Game1.uiViewport.Width - width;
+
+            if (y + height > Game1.uiViewport.Height)
+                y = mouseY - height - 16;
+
+            return new Rectangle(x, y, width, height);
+        }
+        private static void DrawForageSummary(SpriteBatch b, int mouseX, int mouseY, float vanillaH, Dictionary<string, ForageTracker.SummaryEntry> summary)
+        {
+            DisplayMode mode      = Config!.Display;
+            bool showIcons  = mode is DisplayMode.Both or DisplayMode.IconOnly;
+            bool showText   = mode is DisplayMode.Both or DisplayMode.TextOnly;
+            bool remainOnly = Config.ShowRemainingOnly;
+
+            s_lineBuffer.Clear();
+            float maxLabelW = 0f;
+
+            foreach (var (displayName, entry) in summary)
+            {
+                if (remainOnly && entry.Remaining == 0)
+                    continue;
+
+                string count = remainOnly
+                    ? $"×{entry.Remaining}"
+                    : $"×{entry.Remaining} / {entry.Total}";
+
+                string label = showText ? $"{displayName}  {count}" : count;
+
+                float w = Game1.smallFont.MeasureString(label).X * _textScale;
+                if (w > maxLabelW) maxLabelW = w;
+
+                s_lineBuffer.Add((entry.ItemId, label));
+            }
+
+            if (s_lineBuffer.Count == 0) return;
+
+            float iconColW = showIcons ? _iconPx + 6f * _cachedUiScale : 0f;
+            float headerW  = Game1.smallFont.MeasureString(DrawerUIStrings.Forage).X * _textScale;
+            float contentW = Math.Max(headerW, iconColW + maxLabelW);
+            float boxW     = contentW + _padding * 2f;
+            float boxH     = _padding * 2f + _headerHeight + 4f * _cachedUiScale
+                             + s_lineBuffer.Count * _lineHeight;
+
+            float screenW = Game1.uiViewport.Width;
+            float screenH = Game1.uiViewport.Height;
+
+            // ── Position: avoid the vanilla hover banner ──────────────────────
+            //
+            // We try four candidate positions in preference order:
+            //   1. Right of mouse, below banner
+            //   2. Left of mouse, below banner
+            //   3. Right of mouse, above banner
+            //   4. Left of mouse, above banner
+            //
+            // A candidate is accepted when the box fits entirely on screen and
+            // does not overlap the vanilla banner rectangle. The first candidate
+            // that satisfies both constraints wins. If none fit perfectly we fall
+            // back to the on-screen-clamped position least likely to cover the banner.
+
+            // Measure where SDV will draw its own location-name banner.
+            // We need hoverTitle which is set by SDV before our draw call.
+            // We approximate it from regionName passed through vanillaH; the banner
+            // rect is used only for overlap testing so a slight inaccuracy is fine.
+            // Use _lastDisplayName (set just before this call) for banner measurement.
+            Rectangle bannerRect = string.IsNullOrEmpty(_lastDisplayName)
+                ? new Rectangle(mouseX - 100, mouseY - (int)vanillaH, 200, (int)vanillaH)
+                : MeasureVanillaBannerRect(_lastDisplayName, mouseX, mouseY);
+
+            float gap   = _padding * 0.5f;                // gap between our box and banner/cursor
+            float cursorH = 48f * _cachedUiScale;         // approximate cursor height
+
+            // Candidate x positions
+            float xRight = mouseX + gap;
+            float xLeft  = mouseX - boxW - gap;
+
+            // Candidate y positions
+            float yBelow = bannerRect.Bottom + gap;       // just below the banner
+            float yAbove = bannerRect.Y - boxH - gap;     // just above the banner
+
+            // Rect helpers
+            Rectangle BoxAt(float bx, float by) =>
+                new Rectangle((int)bx, (int)by, (int)boxW, (int)boxH);
+
+            bool OnScreen(Rectangle r) =>
+                r.X >= _padding && r.Y >= _padding
+                && r.Right  <= screenW - _padding
+                && r.Bottom <= screenH - _padding;
+
+            bool Overlaps(Rectangle a, Rectangle b2) =>
+                a.Intersects(b2);
+
+            // Try candidates in preference order
+            Rectangle[] candidates =
+            {
+                BoxAt(xRight, yBelow),
+                BoxAt(xLeft,  yBelow),
+                BoxAt(xRight, yAbove),
+                BoxAt(xLeft,  yAbove),
+            };
+
+            Rectangle chosen = candidates[0]; // default
+            foreach (var c in candidates)
+            {
+                if (OnScreen(c) && !Overlaps(c, bannerRect))
+                {
+                    chosen = c;
+                    break;
+                }
+            }
+
+            // Clamp chosen to screen regardless (safety net for any edge case)
+            float finalX = Math.Clamp(chosen.X, _padding, screenW - boxW - _padding);
+            float finalY = Math.Clamp(chosen.Y, _padding, screenH - boxH - _padding);
+
+            // ── Draw ──────────────────────────────────────────────────────────
+            IClickableMenu.drawTextureBox(b, Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                (int)finalX, (int)finalY, (int)boxW, (int)boxH,
+                Color.White, drawShadow: true);
+
+            float cx = finalX + _padding;
+            float cy = finalY + _padding;
+
+            b.DrawString(Game1.smallFont, DrawerUIStrings.Forage, new Vector2(cx, cy),
+                Game1.textColor, 0f, Vector2.Zero, _textScale, SpriteEffects.None, 1f);
+            cy += _headerHeight + 4f * _cachedUiScale;
+
+            foreach (var (itemId, label) in s_lineBuffer)
+            {
+                if (showIcons && !string.IsNullOrEmpty(itemId))
+                    TryDrawItemIcon(b, itemId, new Vector2(cx, cy));
+
+                float textX = showIcons ? cx + _iconPx + 6f * _cachedUiScale : cx;
+                float textH = Game1.smallFont.MeasureString(label).Y * _textScale;
+                float textY = showIcons ? cy + (_iconPx - textH) / 2f : cy;
+
+                b.DrawString(Game1.smallFont, label, new Vector2(textX, textY),
+                    Game1.textColor, 0f, Vector2.Zero, _textScale, SpriteEffects.None, 1f);
+
+                cy += _lineHeight;
+            }
+        }
+        private static void DrawForageSummary(SpriteBatch b, int mouseX, int mouseY, MapPage mapPage, Dictionary<string, ForageTracker.SummaryEntry> summary)
         {
             DisplayMode mode = Config!.Display;
             bool showIcons = mode is DisplayMode.Both or DisplayMode.IconOnly;
@@ -495,25 +708,44 @@ namespace ForageTrackerMod
             float contentW = Math.Max(headerW, iconColW + maxLabelW);
             float boxW = contentW + _padding * 2f;
             float boxH = _padding * 2f + _headerHeight + 4f * _cachedUiScale
-                           + s_lineBuffer.Count * _lineHeight;
+                             + s_lineBuffer.Count * _lineHeight;
 
             float screenW = Game1.uiViewport.Width;
             float screenH = Game1.uiViewport.Height;
-            float bx = mouseX + 28f * _cachedUiScale;
-            float by = mouseY + vanillaH;
 
-            if (bx + boxW > screenW - _padding) bx = screenW - boxW - _padding;
-            if (bx < _padding) bx = _padding;
-            if (by + boxH > screenH - _padding) by = mouseY - vanillaH - boxH - 4f * _cachedUiScale;
-            if (by < _padding) by = _padding;
+            string hoverText = GetMapPageHoverText(mapPage);
 
+            var occupiedRects = new List<Rectangle>();
+
+            Rectangle vanillaRect =
+                GetVanillaHoverRect(
+                    hoverText,
+                    mouseX,
+                    mouseY);
+
+            if (!vanillaRect.IsEmpty)
+                occupiedRects.Add(vanillaRect);
+
+            Rectangle tooltipRect = FindBestTooltipPosition(
+                mouseX,
+                mouseY,
+                (int)boxW,
+                (int)boxH,
+                occupiedRects,
+                Game1.uiViewport.Width,
+                Game1.uiViewport.Height);
+
+            float finalX = tooltipRect.X;
+            float finalY = tooltipRect.Y;
+
+            // ── Draw ──────────────────────────────────────────────────────────
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
                 new Rectangle(0, 256, 60, 60),
-                (int)bx, (int)by, (int)boxW, (int)boxH,
+                (int)finalX, (int)finalY, (int)boxW, (int)boxH,
                 Color.White, drawShadow: true);
 
-            float cx = bx + _padding;
-            float cy = by + _padding;
+            float cx = finalX + _padding;
+            float cy = finalY + _padding;
 
             b.DrawString(Game1.smallFont, DrawerUIStrings.Forage, new Vector2(cx, cy),
                 Game1.textColor, 0f, Vector2.Zero, _textScale, SpriteEffects.None, 1f);
@@ -534,7 +766,138 @@ namespace ForageTrackerMod
                 cy += _lineHeight;
             }
         }
+        private static float ScoreCandidate(
+    Rectangle candidate,
+    Point cursor,
+    List<Rectangle> occupiedRects,
+    int screenW,
+    int screenH)
+        {
+            float score = 0f;
 
+            // Huge penalty for overlap
+            foreach (Rectangle occupied in occupiedRects)
+            {
+                Rectangle intersection =
+                    Rectangle.Intersect(
+                        candidate,
+                        occupied);
+
+                if (!intersection.IsEmpty)
+                {
+                    score -=
+                        intersection.Width *
+                        intersection.Height *
+                        1000f;
+                }
+            }
+
+            // Prefer fully visible positions
+            if (candidate.Left < 0)
+                score -= 50000;
+
+            if (candidate.Top < 0)
+                score -= 50000;
+
+            if (candidate.Right > screenW)
+                score -= 50000;
+
+            if (candidate.Bottom > screenH)
+                score -= 50000;
+
+            // Prefer positions near cursor
+            Point center =
+                new(
+                    candidate.Center.X,
+                    candidate.Center.Y);
+
+            float dx = center.X - cursor.X;
+            float dy = center.Y - cursor.Y;
+
+            float distance =
+                MathF.Sqrt(dx * dx + dy * dy);
+
+            score -= distance * 0.5f;
+
+            // Small bonus for being to the right of cursor
+            if (candidate.X > cursor.X)
+                score += 250;
+
+            // Small bonus for being below cursor
+            if (candidate.Y > cursor.Y)
+                score += 100;
+
+            return score;
+        }
+        private static Rectangle FindBestTooltipPosition(
+    int mouseX,
+    int mouseY,
+    int width,
+    int height,
+    List<Rectangle> occupiedRects,
+    int screenW,
+    int screenH)
+        {
+            Rectangle bestRect = Rectangle.Empty;
+            float bestScore = float.MinValue;
+
+            Point cursor = new(mouseX, mouseY);
+
+            for (int radius = 48; radius <= 600; radius += 24)
+            {
+                for (int angle = 0; angle < 360; angle += 10)
+                {
+                    float rad = MathHelper.ToRadians(angle);
+
+                    int x = mouseX + (int)(Math.Cos(rad) * radius);
+                    int y = mouseY + (int)(Math.Sin(rad) * radius);
+
+                    Rectangle candidate =
+                        new Rectangle(
+                            x,
+                            y,
+                            width,
+                            height);
+
+                    float score =
+                        ScoreCandidate(
+                            candidate,
+                            cursor,
+                            occupiedRects,
+                            screenW,
+                            screenH);
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestRect = candidate;
+                    }
+                }
+            }
+
+            if (bestRect == Rectangle.Empty)
+            {
+                bestRect = new Rectangle(
+                    mouseX + 48,
+                    mouseY + 48,
+                    width,
+                    height);
+            }
+
+            bestRect.X =
+                Math.Clamp(
+                    bestRect.X,
+                    0,
+                    screenW - width);
+
+            bestRect.Y =
+                Math.Clamp(
+                    bestRect.Y,
+                    0,
+                    screenH - height);
+
+            return bestRect;
+        }
         private static void TryDrawItemIcon(SpriteBatch b, string itemId, Vector2 position)
         {
             if (!s_iconCache.TryGetValue(itemId, out var icon))
