@@ -124,6 +124,46 @@ namespace ForageTrackerMod
         }
 
         /// <summary>
+        /// Marks a forageable as un-picked (e.g. the player dropped it back).
+        /// If the tile is already tracked and un-picked, this is a no-op.
+        /// If the tile is not tracked at all (new object placed mid-day),
+        /// the item is added as a new entry and the summary rebuilt.
+        /// </summary>
+        public void MarkAdded(string locationName, Vector2 tile, string itemId, string displayName)
+        {
+            if (!_data.TryGetValue(locationName, out var ld))
+            {
+                // Location had no forage — create a new slot for it.
+                ld = new LocationData();
+                _data[locationName] = ld;
+            }
+
+            if (ld.ByTile.TryGetValue(tile, out var existing))
+            {
+                // Already tracked (was picked earlier) — just un-pick it.
+                if (!existing.Picked) return;
+                existing.Picked = false;
+            }
+            else
+            {
+                // Brand-new tile (player dropped a forageable they had in inventory).
+                var entry = new ForageEntry
+                {
+                    ItemId      = itemId,
+                    DisplayName = displayName,
+                    Tile        = tile,
+                    Picked      = false
+                };
+                ld.Entries.Add(entry);
+                ld.ByTile[tile] = entry;
+            }
+
+            ld.RebuildSummary();
+
+            Debugger.DebugLog(_monitor, $"[ForageTracker] Added/restored: {displayName} @ {tile} in {locationName}.", LogLevel.Trace);
+        }
+
+        /// <summary>
         /// Returns the pre-computed summary for a location.
         /// This is a direct reference — zero allocation on the draw path.
         /// Returns null if the location has no tracked forageables.

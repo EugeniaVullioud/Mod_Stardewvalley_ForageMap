@@ -65,11 +65,71 @@ namespace ForageTrackerMod
             helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
             helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
             helper.Events.Input.ButtonPressed += OnButtonPressed;
-
+            helper.Events.World.DebrisListChanged += OnDebrisListChanged; 
             SetEnabled(_config.Enabled);
             Debugger.DebugLog(Monitor, $"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).", LogLevel.Info);
         }
 
+        private readonly Dictionary<Debris, Vector2> _trackedDebris = new();
+        private void OnDebrisListChanged(object? sender, DebrisListChangedEventArgs e)
+        {
+            foreach (var debris in e.Added)
+            {
+                // debris.item is the actual dropped item (if any)
+                if (debris.item is not StardewValley.Object obj)  continue;
+
+                // only forageables
+                if (!obj.isForage()) continue;
+
+                var location = e.Location;
+               
+                Monitor.Log(
+                    $"[ForageTracker] Debris forage added: {obj.DisplayName} " +
+                    $"@ ({debris.Chunks?[0]?.position ?? null}) in {location.Name}",
+                    LogLevel.Debug
+                );
+                Monitor.Log(
+    $"Added debris hash={debris.GetHashCode()}",
+    LogLevel.Debug);
+
+                Vector2 tile = obj.TileLocation;
+                _trackedDebris[debris] = tile;
+
+                _tracker.MarkAdded(e.Location.Name, tile, obj.QualifiedItemId, obj.DisplayName);
+
+                // Rebuild the location key cache in case this location
+                // wasn't tracked before (e.g. first forageable of the day here).
+                MapTooltipDrawer.RebuildLocationKeyCache();
+                // Positioner box size will change if line count changes —
+                // invalidate so it re-solves on the next hover frame.
+                TooltipPositioner.Invalidate();
+            }
+            // REMOVE (THIS IS WHAT YOU’RE MISSING)
+            foreach (var debris in e.Removed) // To catch foragables that were picked up and dropped -thus turning into debrie.
+            {
+
+                if (!_trackedDebris.TryGetValue(debris, out Vector2 tile))
+                    continue;
+
+                _trackedDebris.Remove(debris);
+
+                _tracker.MarkPicked(e.Location.Name, tile);
+
+                Monitor.Log(
+                    $"Removed tracked debris at {tile}",
+                    LogLevel.Debug );
+
+                // Rebuild the location key cache in case this location
+                // wasn't tracked before (e.g. first forageable of the day here).
+                MapTooltipDrawer.RebuildLocationKeyCache();
+                // Positioner box size will change if line count changes —
+                // invalidate so it re-solves on the next hover frame.
+                TooltipPositioner.Invalidate();
+
+            }
+           
+
+        }
         // ── Enabled state — subscribe/unsubscribe pattern ────────────────────────
 
         private void SetEnabled(bool enable)
@@ -104,7 +164,6 @@ namespace ForageTrackerMod
             _tracker.ScanAllLocations();
             MapTooltipDrawer.RebuildLocationKeyCache();
         }
-
         /// <summary>
         /// Handles mouse left-click to detect a click on the "✏ Edit Regions"
         /// button drawn by the drawer over the map page.
@@ -154,7 +213,13 @@ namespace ForageTrackerMod
             {
                 if (!obj.IsSpawnedObject) continue;
                 _tracker.MarkPicked(e.Location.Name, tile);
-                Debugger.DebugLog(Monitor, $"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Trace);
+                Debugger.DebugLog(Monitor, $"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Debug);
+                // Rebuild the location key cache in case this location
+                // wasn't tracked before (e.g. first forageable of the day here).
+                MapTooltipDrawer.RebuildLocationKeyCache();
+                // Positioner box size will change if line count changes —
+                // invalidate so it re-solves on the next hover frame.
+                TooltipPositioner.Invalidate();
             }
         }
 
