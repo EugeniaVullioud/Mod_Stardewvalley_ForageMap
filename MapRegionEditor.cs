@@ -1,10 +1,13 @@
 using ForageTrackerModSV;
+using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using StardewValley.TerrainFeatures;
+using xTile.Tiles;
 
 namespace ForageTrackerMod
 {
@@ -43,7 +46,7 @@ namespace ForageTrackerMod
         // ── Layout constants ──────────────────────────────────────────────────
 
         int SidebarW;
-        int TabMapGap =2;
+        int TabMapGap = 4;
 
         /// <summary>
         /// All size constants derived from a single TextScale value.
@@ -51,35 +54,61 @@ namespace ForageTrackerMod
         /// </summary>
         private struct UI
         {
-            // The one knob — change this and everything adjusts.
-            public float TextScale;     // e.g. 0.65
+            // ── Single source of truth ────────────────────────────────────────
+            // TextScale = Game1.options.uiScale * base factor (0.65).
+            // Every height, gap and font scale is derived from it so the whole
+            // sidebar stays proportional at any SDV UI scale setting.
+            public float TextScale;
 
-            // Derived heights (all measured from smallFont line height)
-            public int LineH;           // smallFont.LineSpacing * TextScale  → text line
-            public int LabelH;          // LineH + 2                          → label above a control
-            public int FieldH;          // LineH * 2                          → text field / dropdown
-            public int SliderH;         // LineH + 4                          → slider track
-            public int BtnH;            // FieldH + Pad / 2                   → button
-            public int TabH;            // BtnH                               → map tab
-            public int RowH;            // FieldH                             → list row
-            public int Pad;             // LineH                              → general padding
+            // Font scales
+            public float TitleScale;    // dialogueFont for header
+            public float NormalScale;   // smallFont for labels and buttons
+            public float SmallScale;    // smallFont for secondary labels
+            public float TinyScale;     // smallFont for count hints
 
-            // SidebarW removed — sidebar width is now _sideArea.Width, computed
-            // dynamically in the constructor after the map area is placed.
+            // Heights — all measured from smallFont.LineSpacing * NormalScale
+            public int LineH;       // one text line height
+            public int LabelH;      // label row above a control (LineH + vpad)
+            public int FieldH;      // text field / dropdown  (fits one text line + vpad)
+            public int SliderH;     // slider track
+            public int BtnH;        // button (fits label + vertical padding)
+            public int TabH;        // map tab (= BtnH)
+            public int RowH;        // list row (= FieldH)
+            public int Pad;         // general gap between elements
+
+            // Minimum text width helpers
+            public int BtnPadX;     // horizontal padding inside a button (each side)
+
+            // textScale: base scale (e.g. 0.85f). screenW: unused, kept for compat.
             public static UI Compute(float textScale, int screenW)
             {
                 var u = new UI();
                 u.TextScale = textScale;
-                u.LineH = (int)Math.Ceiling(Game1.smallFont.LineSpacing * textScale);
-                u.LabelH = u.LineH + 2;
-                u.FieldH = u.LineH * 2;
-                u.SliderH = u.LineH + 4;
-                u.BtnH = u.FieldH + u.LineH / 2;
-                u.TabH = u.BtnH;
-                u.RowH = u.FieldH;
-                u.Pad = Math.Max(6, u.LineH);
+                u.TitleScale = textScale * 1.25f;
+                u.NormalScale = textScale * 0.95f;
+                u.SmallScale = textScale * 0.85f;
+                u.TinyScale = textScale * 0.75f;
+
+                // All heights measured from the actual rendered line at NormalScale
+                // so they stay proportional when textScale changes.
+                u.LineH   = (int)Math.Ceiling(Game1.smallFont.LineSpacing * u.NormalScale);
+                // vpad = equal top/bottom padding inside controls, proportional to text.
+                int vpad  = Math.Max(3, u.LineH / 4);
+                u.LabelH  = u.LineH + 2;                    // label fits one line + tiny gap
+                u.FieldH  = u.LineH + vpad * 2;             // field: text + equal top/bottom pad
+                u.RowH    = u.LineH + vpad;                  // list row: compact
+                u.SliderH = u.LineH + vpad;                  // slider track same as row
+                u.BtnH    = u.LineH + vpad * 4;             // button: generous vertical padding
+                u.TabH    = u.BtnH;
+                u.Pad     = Math.Max(6, u.LineH / 2);
+                u.BtnPadX = Math.Max(10, u.LineH);
                 return u;
             }
+
+            // Width needed to fit label inside a button with standard padding.
+            public int MeasureBtn(string label) =>
+                (int)Math.Ceiling(Game1.smallFont.MeasureString(label).X * NormalScale)
+                + BtnPadX * 2;
         }
 
         private UI _ui;
@@ -127,9 +156,9 @@ namespace ForageTrackerMod
 
         // ── State ─────────────────────────────────────────────────────────────
 
-        private readonly IModHelper              _helper;
-        private readonly IMonitor                _monitor;
-        private readonly MapRegionConfig         _cfg;
+        private readonly IModHelper _helper;
+        private readonly IMonitor _monitor;
+        private readonly MapRegionConfig _cfg;
         private readonly Action<MapRegionConfig> _onSave;
         private int _edgeGrab;
 
@@ -142,9 +171,9 @@ namespace ForageTrackerMod
         private readonly List<string> _mapKeys;  // ordered list for ◀ ▶ navigation
 
         // Map display
-        private readonly MapPage?  _mapPage;
+        private readonly MapPage? _mapPage;
         private readonly Rectangle _mapPanel;
-        private Rectangle          _mapArea;   // actual image rect (from MapRenderUtility)
+        private Rectangle _mapArea;   // actual image rect (from MapRenderUtility)
 
         // Sidebar
         private readonly Rectangle _sideArea;
@@ -167,30 +196,31 @@ namespace ForageTrackerMod
         private Rectangle _textScaleSliderRect;
         private bool _draggingTextScale;
         // Selection & drag
-        private int    _sel      = -1;
-        private bool   _dragging = false;
+        private int _sel = -1;
+        private bool _dragging = false;
 
         private Rectangle _edgeGrabSliderRect;
         private bool _draggingEdgeGrab;
 
         private enum Handle { None, Move, Left, Right, Top, Bottom }
-        private Handle _handle   = Handle.None;
-        private Point  _dragAnchor;
-        private float  _origL, _origT, _origR, _origB;
+        private Handle _handle = Handle.None;
+        private Point _dragAnchor;
+        private float _origL, _origT, _origR, _origB;
 
         // Text input (name field only — locations use dropdown)
-        private string _fieldName    = "";
-        private bool   _nameFocused  = false;
+        private string _fieldName = "";
+        private bool _nameFocused = false;
 
         // Dropdown state
-        private bool _dropdownOpen   = false;
-        private int  _dropdownScroll = 0;
+        private bool _dropdownOpen = false;
+        private int _dropdownScroll = 0;
         private const int DropdownVisibleRows = 8;
-        private const int DropdownRowH        = 28;
+        // DropdownRowH must use _ui.RowH — NOT a const — so it scales with text.
+        private int DropdownRowH => Math.Max(_ui.RowH, _ui.LineH + 4);
 
         // New-map dialog
-        private bool   _newMapDialogOpen = false;
-        private string _newMapName       = "";
+        private bool _newMapDialogOpen = false;
+        private string _newMapName = "";
         private const int newMapW = 130;
 
         // Delete map confirmation - dialogue
@@ -204,26 +234,21 @@ namespace ForageTrackerMod
         private readonly Dictionary<string, string> _bindings;  // mapKey → bound SDV key
 
         // Location list scroll (replaces the old "+N more" cap)
-        private int _locListScroll   = 0;
-        private const int LocListRowH        = 28;
-        private const int LocListVisibleRows = 6;   // rows shown before scrolling kicks in
+        private int _locListScroll = 0;
+        private int LocListRowH => Math.Max(_ui.RowH, _ui.LineH + 4);
         private Rectangle _locListScrollbarTrack;
-        private bool      _locListScrollDragging = false;
-        private int       _locListScrollDragStartY;
-        private int       _locListScrollDragStartVal;
+
 
         // ── Constructor ───────────────────────────────────────────────────────
 
-        public MapRegionEditor(IModHelper helper, IMonitor monitor,
-            MapRegionConfig cfg, Action<MapRegionConfig> onSave)
-            : base(0, 0, Game1.uiViewport.Width, Game1.uiViewport.Height)
+        public MapRegionEditor(IModHelper helper, IMonitor monitor, MapRegionConfig cfg, Action<MapRegionConfig> onSave) : base(0, 0, Game1.uiViewport.Width, Game1.uiViewport.Height)
         {
-            _helper  = helper;
+            _helper = helper;
             _monitor = monitor;
-            _cfg     = cfg;
-            _onSave  = onSave;
+            _cfg = cfg;
+            _onSave = onSave;
 
-            _ui = UI.Compute(0.65f, Game1.uiViewport.Width);
+            _ui = UI.Compute(1f, Game1.uiViewport.Width);
 
             // _ui.SidebarW used as the minimum reservation; actual width set after map placement.
             _edgeGrab = Math.Max(2, cfg.EdgeGrabPixels);
@@ -284,9 +309,9 @@ namespace ForageTrackerMod
             const int NativeMapH = 720;
 
             // Reserve minimum sidebar space so the map doesn't crush it.
-            int minSidebar = 260; 
+            int minSidebar = 260;
             int availW = sw - minSidebar - _ui.Pad * 3;
-            int availH = sh - _ui.Pad * 2 - _ui.TabH - TabMapGap;
+            int availH = sh - _ui.Pad * 2 - _ui.TabH - (int)(TabMapGap * _ui.TextScale);
 
             float scaleX = (float)availW / NativeMapW;
             float scaleY = (float)availH / NativeMapH;
@@ -298,8 +323,8 @@ namespace ForageTrackerMod
             int mapY = _ui.Pad + _ui.TabH + TabMapGap + (availH - mapH) / 2;
 
             _mapPanel = new Rectangle(mapX, mapY, mapW, mapH);
-            _mapPage  = new MapPage(mapX, mapY, mapW, mapH);
-            _mapArea  = MapRenderUtility.ComputeActualMapRect(_mapPage);
+            _mapPage = new MapPage(mapX, mapY, mapW, mapH);
+            _mapArea = MapRenderUtility.ComputeActualMapRect(_mapPage);
 
             MapTooltipDrawer.LastLiveMapRect ??= new Rectangle(mapX, mapY, mapW, mapH);
 
@@ -312,22 +337,10 @@ namespace ForageTrackerMod
             // Build location list from the live game world — no hardcoding.
             // BuildKnownLocations() walks Game1.locations + building interiors,
             // so Quarry and all modded locations appear automatically.
-            _allLocations = BuildKnownLocations();
+            _allLocations = BuildKnownLocations(monitor);
             _allLocations.Sort();
 
             LayoutSidebar();
-        }
-        private SidebarRow NextLabeledControl(VerticalLayout layout, int controlHeight)
-        {
-            const int LabelHeight = 18;
-
-            SidebarRow row = new();
-
-            row.LabelRect =layout.Next(LabelHeight);
-
-            row.ControlRect = layout.Next(controlHeight);
-
-            return row;
         }
         private string? FindTabBoundToCurrentMap()
         {
@@ -358,8 +371,8 @@ namespace ForageTrackerMod
 
             if (_newMapDialogOpen)
             {
-                _newMapName  += c;
-                _newMapError  = ""; // clear error as soon as they type
+                _newMapName += c;
+                _newMapError = ""; // clear error as soon as they type
             }
             else if (_nameFocused)
                 _fieldName += c;
@@ -402,118 +415,101 @@ namespace ForageTrackerMod
         {
             int x = _sideArea.X + _ui.Pad;
             int w = _sideArea.Width - _ui.Pad * 2;
+            int gap = _ui.Pad;              // one consistent gap everywhere
 
-            // ── Measure all fixed-height elements ─────────────────────────────
-            const int LabelH   = 18;
-            const int FieldH   = 34;
-            const int SliderH  = 24;
-            const int Gap      = 20;
+            // ── Header height (measured, not guessed) ────────────────────────
+            int titleH = (int)Math.Ceiling(Game1.dialogueFont.MeasureString(EditorUIStrings.EditRegions).Y * _ui.TitleScale);
+            int mapKeyH = (int)Math.Ceiling(Game1.smallFont.MeasureString("Map: X").Y * _ui.NormalScale);
+            int mapHintH = (int)Math.Ceiling(Game1.smallFont.MeasureString("X").Y * _ui.SmallScale);
+            int headerH = titleH + mapKeyH + mapHintH + gap * 2;
 
-            // Fixed cost below the header (does not include the location list)
+            // ── Fixed cost of all non-list elements below the header ─────────
             int fixedCost =
-                  LabelH + FieldH + Gap          // name field
-                + LabelH + FieldH + Gap          // location dropdown
-                + Gap                            // gap between list and color btn
-                + _ui.BtnH + Gap                     // color button
-                + LabelH + SliderH + Gap         // opacity slider
-                + SliderH + Gap                  // text color button
-                + LabelH + SliderH + Gap         // text scale slider
-                + LabelH + SliderH + Gap         // edge grab slider
-                + Gap * 2                        // separator before map buttons
-                + _ui.BtnH + Gap                     // bind + del map
-                + _ui.BtnH + Gap                     // add + del region
-                + _ui.BtnH + Gap                     // save
-                + _ui.BtnH + Gap;                    // cancel + bottom pad
+                  _ui.LabelH + _ui.FieldH + gap      // name label + field
+                + _ui.LabelH + _ui.FieldH + gap      // loc label  + dropdown
+                + gap                                  // before color button
+                + _ui.BtnH + gap                    // color button
+                + _ui.LabelH + _ui.SliderH + gap      // opacity label + slider
+                + _ui.BtnH + gap                    // text color button
+                + _ui.LabelH + _ui.SliderH + gap      // text scale label + slider
+                + _ui.LabelH + _ui.SliderH + gap * 2  // edge grab label + slider + separator
+                + _ui.BtnH + gap                    // bind + del map
+                + _ui.BtnH + gap                    // add + del region
+                + _ui.BtnH + gap                    // save
+                + _ui.BtnH + gap;                   // cancel
 
-            // Header block: measured from actual font sizes so it never overlaps.
-            // dialogueFont at 0.65 scale, smallFont at 0.7 and 0.58 scale.
-            int titleH   = (int)(Game1.dialogueFont.MeasureString(EditorUIStrings.EditRegions).Y * 0.65f);
-            int mapKeyH  = (int)(Game1.smallFont.MeasureString("Map: X").Y * 0.7f);
-            int mapHintH = (int)(Game1.smallFont.MeasureString("X").Y * 0.58f);
-            int headerH  = titleH + mapKeyH + mapHintH + Gap * 2;
-
-            int totalAvail  = _sideArea.Height - _ui.Pad - headerH;
-            int listAvail   = Math.Max(0, totalAvail - fixedCost);
-
-            // Clamp visible rows so the list never overflows
-            int dynRows = Math.Max(1, listAvail / LocListRowH);
-            int visRows = Math.Min(dynRows, 8); // cap at 8 for readability
-
-            int locListH   = LocListRowH * visRows;
-            int scrollbarW = 10;
+            // ── Dynamic location list height ─────────────────────────────────
+            int totalAvail = _sideArea.Height - _ui.Pad - headerH;
+            int listAvail = Math.Max(0, totalAvail - fixedCost);
+            int visRows = Math.Clamp(listAvail / _ui.RowH, 1, 8);
+            int locListH = _ui.RowH * visRows;
+            int scrollbarW = Math.Max(8, _ui.Pad / 2);
 
             // ── Place controls top → bottom ───────────────────────────────────
             int y = _sideArea.Y + _ui.Pad + headerH;
 
-            // Name field
-            y += LabelH;
-            _nameFieldRect = new Rectangle(x, y, w, FieldH);
-            y += FieldH + Gap;
+            // Name label space + field
+            y += _ui.LabelH;
+            _nameFieldRect = new Rectangle(x, y, w, _ui.FieldH);
+            y += _ui.FieldH + gap;
 
-            // Location dropdown
-            int addW = Math.Max(50, (int)(w * 0.18f));  // ~18% of sidebar width
-            y += LabelH;
-            _locDropdownRect = new Rectangle(x, y, w - addW - _ui.Pad, FieldH);
-            _btnAddLocRect   = new Rectangle(_locDropdownRect.Right + _ui.Pad, y, addW, FieldH);
-            y += FieldH + Gap;
+            // Locations label space + dropdown + add button
+            y += _ui.LabelH;
+            int addW = Math.Max(_ui.MeasureBtn(EditorUIStrings.AddLocation), (int)(w * 0.22f));
+            _locDropdownRect = new Rectangle(x, y, w - addW - _ui.Pad, _ui.FieldH);
+            _btnAddLocRect = new Rectangle(_locDropdownRect.Right + _ui.Pad, y, addW, _ui.FieldH);
+            y += _ui.FieldH + gap;
 
-            // Location list + scrollbar (same top)
-            int listTop = y;
+            // Location list + scrollbar
             _locListScrollbarTrack = new Rectangle(
-                _sideArea.Right - _ui.Pad - scrollbarW, listTop,
-                scrollbarW, locListH);
-            y += locListH + Gap;
+                _sideArea.Right - _ui.Pad - scrollbarW, y, scrollbarW, locListH);
+            y += locListH + gap;
 
-            // Color button
+            // Color button (full width)
             _btnColorRect = new Rectangle(x, y, w, _ui.BtnH);
-            y += _ui.BtnH + Gap;
+            y += _ui.BtnH + gap;
 
-            // Opacity slider
-            y += LabelH;
-            _opacitySliderRect = new Rectangle(x, y, w, SliderH);
-            y += SliderH + Gap;
+            // Opacity label + slider
+            y += _ui.LabelH;
+            _opacitySliderRect = new Rectangle(x, y, w, _ui.SliderH);
+            y += _ui.SliderH + gap;
 
-            // Text color button
-            _btnTextColorRect = new Rectangle(x, y, w, SliderH);
-            y += SliderH + Gap;
+            // Text color button (full width, same height as other buttons)
+            _btnTextColorRect = new Rectangle(x, y, w, _ui.BtnH);
+            y += _ui.BtnH + gap;
 
-            // Text scale slider
-            y += LabelH;
-            _textScaleSliderRect = new Rectangle(x, y, w, SliderH);
-            y += SliderH + Gap;
+            // Text scale label + slider
+            y += _ui.LabelH;
+            _textScaleSliderRect = new Rectangle(x, y, w, _ui.SliderH);
+            y += _ui.SliderH + gap;
 
-            // Edge grab slider
-            y += LabelH;
-            _edgeGrabSliderRect = new Rectangle(x, y, w, SliderH);
-            y += SliderH + Gap * 2;
+            // Edge grab label + slider + separator
+            y += _ui.LabelH;
+            _edgeGrabSliderRect = new Rectangle(x, y, w, _ui.SliderH);
+            y += _ui.SliderH + gap * 2;
 
-            // Bind + Delete Map (side by side)
+            // Bind + Delete Map (side by side, equal halves)
             int half = (w - _ui.Pad) / 2;
-            _btnBindRect   = new Rectangle(x,            y, half, _ui.BtnH);
+            _btnBindRect = new Rectangle(x, y, half, _ui.BtnH);
             _btnDelMapRect = new Rectangle(x + half + _ui.Pad, y, half, _ui.BtnH);
-            y += _ui.BtnH + Gap;
+            y += _ui.BtnH + gap;
 
             // Add + Delete Region (side by side)
-            _btnAddRegionRect = new Rectangle(x,            y, half, _ui.BtnH);
+            _btnAddRegionRect = new Rectangle(x, y, half, _ui.BtnH);
             _btnDelRegionRect = new Rectangle(x + half + _ui.Pad, y, half, _ui.BtnH);
-            y += _ui.BtnH + Gap;
+            y += _ui.BtnH + gap;
 
-            // Save
+            // Save + Cancel (full width)
             _btnSaveRect = new Rectangle(x, y, w, _ui.BtnH);
-            y += _ui.BtnH + Gap;
-
-            // Cancel
+            y += _ui.BtnH + gap;
             _btnCancelRect = new Rectangle(x, y, w, _ui.BtnH);
 
-            // Persist visible row count so draw + input use the same value
             _dynLocListVisibleRows = visRows;
         }
 
         // Dynamic row count computed by LayoutSidebar — used everywhere
         // instead of the const LocListVisibleRows so it responds to screen size.
         private int _dynLocListVisibleRows = 6;
-
-        // ── Draw ──────────────────────────────────────────────────────────────
 
         public override void draw(SpriteBatch b)
         {
@@ -541,14 +537,14 @@ namespace ForageTrackerMod
             int mx = Game1.getMouseX(), my = Game1.getMouseY();
             for (int i = 0; i < _currentRegions.Count; i++)
             {
-                var  r     = _currentRegions[i];
-                var  sr    = ToScreen(r);
+                var r = _currentRegions[i];
+                var sr = ToScreen(r);
                 bool isSel = i == _sel;
                 bool isHov = !isSel && sr.Contains(mx, my);
 
                 float alpha = r.Opacity / 255f;
 
-                b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? alpha : alpha *0.85f));
+                b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? alpha : alpha * 0.85f));
                 DrawBorder(b, sr, isSel ? Color.White : (isHov ? Color.Yellow : r.Color), isSel ? 3 : (isHov ? 2 : 1));
 
                 if (sr.Width > 40)
@@ -566,9 +562,9 @@ namespace ForageTrackerMod
 
                     size = Game1.smallFont.MeasureString(r.Name) * scale;
 
-                    if (size.Y > maxHeight)  scale *= maxHeight / size.Y;
+                    if (size.Y > maxHeight) scale *= maxHeight / size.Y;
 
-                    b.DrawString( Game1.smallFont, r.Name, new Vector2(sr.X + 4, sr.Y + 4), r.TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                    b.DrawString(Game1.smallFont, r.Name, new Vector2(sr.X + 4, sr.Y + 4), r.TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
                 }
 
                 if (isSel)
@@ -577,7 +573,7 @@ namespace ForageTrackerMod
 
                     // Visualize grab zones
                     // Opacity-based visibility
-                    byte alphaVis = (byte)Math.Min(255, _currentRegions[_sel].Opacity *1.15f); // +15%
+                    byte alphaVis = (byte)Math.Min(255, _currentRegions[_sel].Opacity * 1.15f); // +15%
                     Color dragZone = _currentRegions[_sel].Color;
                     dragZone.A = alphaVis;
 
@@ -622,13 +618,13 @@ namespace ForageTrackerMod
                         dragZone);
                 }
             }
-
+#if DEBUG
             // ── Debug overlay — draws fraction grid and mouse position ────────
             // BEGIN DEBUG BLOCK — remove before shipping
             if (MapTooltipDrawer.DebugMode)
             {
                 int mx2 = Game1.getMouseX(), my2 = Game1.getMouseY();
-                float dbgRelX = (_mapArea.Width  > 0) ? (mx2 - _mapArea.X) / (float)_mapArea.Width  : 0f;
+                float dbgRelX = (_mapArea.Width > 0) ? (mx2 - _mapArea.X) / (float)_mapArea.Width : 0f;
                 float dbgRelY = (_mapArea.Height > 0) ? (my2 - _mapArea.Y) / (float)_mapArea.Height : 0f;
 
                 // Crosshair at mouse position clamped to map area
@@ -661,7 +657,7 @@ namespace ForageTrackerMod
                     Color.Yellow, 0f, Vector2.Zero, 0.55f, SpriteEffects.None, 1f);
             }
             // END DEBUG BLOCK
-
+#endif
             // ── Sidebar ───────────────────────────────────────────────────────
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
                 new Rectangle(0, 256, 60, 60),
@@ -672,9 +668,9 @@ namespace ForageTrackerMod
             int tx = _sideArea.X + _ui.Pad;
             int ty = _sideArea.Y + _ui.Pad;
 
-            const float titleScale  = 0.65f;
-            const float mapKeyScale = 0.70f;
-            const float hintScale   = 0.58f;
+            float titleScale = _ui.TitleScale;
+            float mapKeyScale = _ui.NormalScale;
+            float hintScale = _ui.SmallScale;
 
             b.DrawString(Game1.dialogueFont, EditorUIStrings.EditRegions,
                 new Vector2(tx, ty), Game1.textColor,
@@ -689,9 +685,9 @@ namespace ForageTrackerMod
 
             string mapHint = _currentMapKey switch
             {
-                "Town"   => EditorUIStrings.TownMapHint,
+                "Town" => EditorUIStrings.TownMapHint,
                 "Island" => EditorUIStrings.IslandMapHint,
-                _        => $"{EditorUIStrings.CustomMapHint} \"{_currentMapKey}\""
+                _ => $"{EditorUIStrings.CustomMapHint} \"{_currentMapKey}\""
             };
             b.DrawString(Game1.smallFont, mapHint,
                 new Vector2(tx, ty), Game1.textColor * 0.6f,
@@ -703,23 +699,23 @@ namespace ForageTrackerMod
 
                 // Name field
                 b.DrawString(Game1.smallFont, EditorUIStrings.AreaName,
-                    new Vector2(tx, _nameFieldRect.Y - 18), Game1.textColor,
-                    0f, Vector2.Zero, 0.65f, SpriteEffects.None, 1f);
-                DrawTextField(b, _nameFieldRect, _fieldName, _nameFocused);
+                    new Vector2(tx, _nameFieldRect.Y - _ui.LabelH), Game1.textColor,
+                    0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
+                DrawTextField(b, _nameFieldRect, _fieldName, _nameFocused, _ui);
 
                 // Location section header
                 b.DrawString(Game1.smallFont, EditorUIStrings.SDVLocations,
-                    new Vector2(tx, _locDropdownRect.Y - 18), Game1.textColor,
-                    0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
+                    new Vector2(tx, _locDropdownRect.Y - _ui.LabelH), Game1.textColor,
+                    0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
                 // Dropdown
                 DrawDropdownBox(b, _locDropdownRect);
-                DrawButton(b, _btnAddLocRect, EditorUIStrings.AddLocation, Color.White);
+                DrawButton(b, _btnAddLocRect, EditorUIStrings.AddLocation, Color.White, _ui);
 
                 // ── Scrollable location list ──────────────────────────────────
-                int locListX  = tx;
+                int locListX = tx;
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListW  = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
+                int locListW = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
                 int maxScroll = Math.Max(0, r.Locations.Count - _dynLocListVisibleRows);
                 _locListScroll = Math.Clamp(_locListScroll, 0, maxScroll);
 
@@ -735,16 +731,15 @@ namespace ForageTrackerMod
                     int idx = i + _locListScroll;
                     if (idx >= r.Locations.Count) break;
 
-                    int rowY        = locListY0 + i * LocListRowH;
-                    var locRect     = new Rectangle(locListX, rowY, locListW - 34, LocListRowH - 2);
-                    var removeRect  = new Rectangle(locRect.Right + 4, rowY, 28, LocListRowH - 2);
-
+                    int rowY = locListY0 + i * LocListRowH;
+                    var locRect = new Rectangle(locListX, rowY, locListW - 34, LocListRowH - 2);
+                    var removeRect = new Rectangle(locRect.Right + 4, rowY, 28, LocListRowH - 2);
                     b.Draw(Game1.fadeToBlackRect, locRect, Color.Black * 0.2f);
                     b.DrawString(Game1.smallFont, r.Locations[idx],
-                        new Vector2(locRect.X + 4, locRect.Y + 5),
-                        Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                        new Vector2(locRect.X + 4, locRect.Y + (_ui.RowH - _ui.LineH) / 2),
+                        Color.White, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
 
-                    DrawButton(b, removeRect, EditorUIStrings.DeleteFromDropdown, new Color(220, 100, 100));
+                    DrawButton(b, removeRect, EditorUIStrings.DeleteFromDropdown, new Color(220, 100, 100), _ui);
                 }
 
                 // Scrollbar
@@ -755,10 +750,10 @@ namespace ForageTrackerMod
 
                     b.Draw(Game1.fadeToBlackRect, track, Color.Black * 0.4f);
 
-                    float thumbFrac   = (float)_dynLocListVisibleRows / r.Locations.Count;
+                    float thumbFrac = (float)_dynLocListVisibleRows / r.Locations.Count;
                     float thumbOffset = maxScroll > 0 ? (float)_locListScroll / maxScroll : 0f;
-                    int   thumbH      = Math.Max(16, (int)(track.Height * thumbFrac));
-                    int   thumbY      = track.Y + (int)((track.Height - thumbH) * thumbOffset);
+                    int thumbH = Math.Max(16, (int)(track.Height * thumbFrac));
+                    int thumbY = track.Y + (int)((track.Height - thumbH) * thumbOffset);
 
                     b.Draw(Game1.fadeToBlackRect,
                         new Rectangle(track.X + 1, thumbY, track.Width - 2, thumbH),
@@ -768,59 +763,59 @@ namespace ForageTrackerMod
                     b.DrawString(Game1.smallFont,
                         $"{_locListScroll + 1}–{Math.Min(_locListScroll + _dynLocListVisibleRows, r.Locations.Count)}/{r.Locations.Count}",
                         new Vector2(locListX, locListY0 + LocListRowH * _dynLocListVisibleRows + 2),
-                        Color.White * 0.5f, 0f, Vector2.Zero, 0.5f, SpriteEffects.None, 1f);
+                        Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
                 }
 
                 // Color button
-                DrawButton(b, _btnColorRect, EditorUIStrings.CycleAreaColor, Color.White);
+                DrawButton(b, _btnColorRect, EditorUIStrings.CycleAreaColor, Color.White, _ui);
                 b.Draw(Game1.fadeToBlackRect,
                     new Rectangle(_btnColorRect.Right - _ui.BtnH + 4,
-                                  _btnColorRect.Y + 4, _ui.BtnH - 8, _ui.BtnH - 8),  r.Color);
+                                  _btnColorRect.Y + 4, _ui.BtnH - 8, _ui.BtnH - 8), r.Color);
 
-               
+
                 // Opacity 
-                b.DrawString( Game1.smallFont,$"{EditorUIStrings.Opacity} {r.Opacity}",
-                    new Vector2(_opacitySliderRect.X, _opacitySliderRect.Y - 18),Color.White, 0f, Vector2.Zero, 0.6f,SpriteEffects.None,1f);
+                b.DrawString(Game1.smallFont, $"{EditorUIStrings.Opacity} {r.Opacity}",
+                    new Vector2(_opacitySliderRect.X, _opacitySliderRect.Y - _ui.LabelH), Color.White, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
 
-                b.Draw( Game1.fadeToBlackRect, _opacitySliderRect,  Color.Black * 0.6f); // Track
-                DrawBorder( b, _opacitySliderRect, Color.White,  1);
+                b.Draw(Game1.fadeToBlackRect, _opacitySliderRect, Color.Black * 0.6f); // Track
+                DrawBorder(b, _opacitySliderRect, Color.White, 1);
 
                 // Opacity Thumb
                 float pct = r.Opacity / 255f;
 
-                int thumbX =  _opacitySliderRect.X + (int)(_opacitySliderRect.Width * pct);
+                int thumbX = _opacitySliderRect.X + (int)(_opacitySliderRect.Width * pct);
 
-                b.Draw( Game1.fadeToBlackRect, new Rectangle( thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
+                b.Draw(Game1.fadeToBlackRect, new Rectangle(thumbX - 4, _opacitySliderRect.Y - 2, 8, _opacitySliderRect.Height + 4), Color.White);
 
 
-                DrawButton(b, _btnTextColorRect, EditorUIStrings.CycleTextColor, Color.White);
+                DrawButton(b, _btnTextColorRect, EditorUIStrings.CycleTextColor, Color.White, _ui);
 
-                b.DrawString( Game1.smallFont, $"{EditorUIStrings.TextSize} {_cfg.RegionLabelScale:F2}", new Vector2( _textScaleSliderRect.X, _textScaleSliderRect.Y - 18), Color.White,  0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                b.DrawString(Game1.smallFont, $"{EditorUIStrings.TextSize} {_cfg.RegionLabelScale:F2}", new Vector2(_textScaleSliderRect.X, _textScaleSliderRect.Y - _ui.LabelH), Color.White, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
 
-                b.Draw( Game1.fadeToBlackRect, _textScaleSliderRect, Color.Black * 0.6f);
+                b.Draw(Game1.fadeToBlackRect, _textScaleSliderRect, Color.Black * 0.6f);
 
-                DrawBorder(b,_textScaleSliderRect, Color.White, 1);
+                DrawBorder(b, _textScaleSliderRect, Color.White, 1);
 
                 float pctTxt = (_cfg.RegionLabelScale - 0.4f) / (1.5f - 0.4f);
 
                 int thumbXText = _textScaleSliderRect.X + (int)(_textScaleSliderRect.Width * pctTxt);
 
-                b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXText - 4, _textScaleSliderRect.Y - 2, 8, _textScaleSliderRect.Height + 4), Color.White);
+                b.Draw(Game1.fadeToBlackRect, new Rectangle(thumbXText - 4, _textScaleSliderRect.Y - 2, 8, _textScaleSliderRect.Height + 4), Color.White);
 
                 // Drag border
-                b.DrawString(Game1.smallFont, $"{EditorUIStrings.BorderTolerance} {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - 18), Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                b.DrawString(Game1.smallFont, $"{EditorUIStrings.BorderTolerance} {_edgeGrab}", new Vector2(_edgeGrabSliderRect.X, _edgeGrabSliderRect.Y - _ui.LabelH), Color.White, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
 
-                b.Draw(Game1.fadeToBlackRect,  _edgeGrabSliderRect, Color.Black * 0.6f);
-                
+                b.Draw(Game1.fadeToBlackRect, _edgeGrabSliderRect, Color.Black * 0.6f);
+
                 float pctBorder = (_edgeGrab - 2) / 38f;
 
-                int thumbXBorder =  _edgeGrabSliderRect.X + (int)(_edgeGrabSliderRect.Width * pctBorder);
+                int thumbXBorder = _edgeGrabSliderRect.X + (int)(_edgeGrabSliderRect.Width * pctBorder);
 
                 int thumbWidth = _edgeGrab;
                 thumbWidth = Math.Clamp(thumbWidth, 6, 30);
 
-                b.Draw( Game1.fadeToBlackRect, new Rectangle(thumbXBorder - 4, _edgeGrabSliderRect.Y - 2, 8, _edgeGrabSliderRect.Height + 4),  Color.White);
-               
+                b.Draw(Game1.fadeToBlackRect, new Rectangle(thumbXBorder - 4, _edgeGrabSliderRect.Y - 2, 8, _edgeGrabSliderRect.Height + 4), Color.White);
+
             }
             else
             {
@@ -829,21 +824,21 @@ namespace ForageTrackerMod
                 // control zone — computed dynamically by LayoutSidebar.
                 b.DrawString(Game1.smallFont, EditorUIStrings.ClickRegionHint,
                     new Vector2(tx, _nameFieldRect.Y),
-                    Game1.textColor * 0.7f, 0f, Vector2.Zero, 0.68f, SpriteEffects.None, 1f);
+                    Game1.textColor * 0.7f, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
             }
 
             // ── Bind + Delete Map buttons ─────────────────────────────────────
             string liveKey = MapKeyHelper.GetCurrentMapKey();
-            bool   isBound = _bindings.TryGetValue(_currentMapKey, out var boundTo)
+            bool isBound = _bindings.TryGetValue(_currentMapKey, out var boundTo)
                              && boundTo == liveKey;
 
             string bindLabel = isBound ? $"✓ {liveKey}" : $"{EditorUIStrings.Bind} {liveKey}";
-            Color  bindColor = isBound ? new Color(140, 220, 140) : new Color(220, 200, 100);
-            DrawButton(b, _btnBindRect, bindLabel, bindColor);
+            Color bindColor = isBound ? new Color(140, 220, 140) : new Color(220, 200, 100);
+            DrawButton(b, _btnBindRect, bindLabel, bindColor, _ui);
 
             bool canDelete = _mapKeys.Count > 1; // must always keep at least one tab
             DrawButton(b, _btnDelMapRect, EditorUIStrings.DeleteMap,
-                canDelete ? new Color(220, 100, 80) : Color.Gray * 0.5f);
+                canDelete ? new Color(220, 100, 80) : Color.Gray * 0.5f, _ui);
 
             // ── Binding status banners ────────────────────────────────────────
             // (1) Unbound warning — this map tab has no binding at all
@@ -861,10 +856,10 @@ namespace ForageTrackerMod
                 DrawStatusBanner(b, notice, Color.Yellow, new Color(0, 0, 0, 200));
             }
 
-            DrawButton(b, _btnAddRegionRect, EditorUIStrings.AddRegion,   Color.White);
-            DrawButton(b, _btnDelRegionRect, EditorUIStrings.Delete,       _sel >= 0 ? Color.White : Color.Gray * 0.5f);
-            DrawButton(b, _btnSaveRect, EditorUIStrings.Save,        new Color(140, 220, 140));
-            DrawButton(b, _btnCancelRect, EditorUIStrings.Cancel,       new Color(220, 120, 120));
+            DrawButton(b, _btnAddRegionRect, EditorUIStrings.AddRegion, Color.White, _ui);
+            DrawButton(b, _btnDelRegionRect, EditorUIStrings.Delete, _sel >= 0 ? Color.White : Color.Gray * 0.5f, _ui);
+            DrawButton(b, _btnSaveRect, EditorUIStrings.Save, new Color(140, 220, 140), _ui);
+            DrawButton(b, _btnCancelRect, EditorUIStrings.Cancel, new Color(220, 120, 120), _ui);
 
             // ── Dropdown overlay (drawn last so it's on top) ──────────────────
             if (_dropdownOpen)
@@ -895,7 +890,7 @@ namespace ForageTrackerMod
             //EnsureSelectedTabVisible();
 
             int tabY =
-                _mapArea.Y - _ui.TabH - TabMapGap;
+                _mapArea.Y - _ui.TabH - (int)(TabMapGap * _ui.TextScale);
             /*
             bool hiddenLeft =
                 _firstVisibleTab > 0;
@@ -913,41 +908,34 @@ namespace ForageTrackerMod
             {
                 _firstVisibleTab = 0;
             }
-            bool hiddenLeft = !allFit &&  _firstVisibleTab > 0;
+            bool hiddenLeft = !allFit && _firstVisibleTab > 0;
 
-            int lastVisible =  GetLastVisibleTab();
+            int lastVisible = GetLastVisibleTab();
 
             bool hiddenRight =
                 !allFit &&
                 lastVisible < _mapKeys.Count - 1;
 
-            const int newMapWw = 130;
+            // "+ New Map" button width measured from its label — no hardcoding.
+            int newMapBtnW = _ui.MeasureBtn(EditorUIStrings.NewMap);
 
-            int tabsStartX = _mapArea.X + TabArrowW + 6;
-
-            int tabsEndX =
-                _mapArea.Right
-                - newMapWw
-                - TabArrowW
-                - 6;
+            // Arrow buttons sit flush at each end of the tab row.
+            // Tab content runs between them, separated by _ui.Pad.
+            int tabsStartX = _mapArea.X + TabArrowW + _ui.Pad;
+            int tabsEndX = _mapArea.Right - newMapBtnW - TabArrowW - _ui.Pad;
 
             int x = tabsStartX;
 
-            _btnTabLeftRect = new Rectangle(
-              _mapArea.X,
-              tabY,
-              TabArrowW,
-              _ui.TabH);
+            _btnTabLeftRect = new Rectangle(_mapArea.X, tabY, TabArrowW, _ui.TabH);
+            _btnTabRightRect = new Rectangle(_mapArea.Right - newMapBtnW - TabArrowW - _ui.Pad,
+                                             tabY, TabArrowW, _ui.TabH);
 
-            _btnTabRightRect = new Rectangle( _mapArea.Right - newMapWw - TabArrowW - 4,  tabY, TabArrowW, _ui.TabH);
+            if (hiddenLeft) DrawButton(b, _btnTabLeftRect, EditorUIStrings.LeftArrow, Color.White, _ui);
 
-            if (hiddenLeft) DrawButton(b, _btnTabLeftRect, EditorUIStrings.LeftArrow, Color.White);
-
-            if (hiddenRight) DrawButton(b, _btnTabRightRect, EditorUIStrings.RightArrow, Color.White);
+            if (hiddenRight) DrawButton(b, _btnTabRightRect, EditorUIStrings.RightArrow, Color.White, _ui);
 
 
-            const float scale = 0.68f;
-            const int tabPadX = 18;
+            float tabScale = _ui.NormalScale;
 
             for (int i = _firstVisibleTab; i <= lastVisible; i++)
             {
@@ -1012,7 +1000,7 @@ namespace ForageTrackerMod
                     drawShadow: !active);
 
                 Vector2 labelSize =
-                    Game1.smallFont.MeasureString(label) * scale;
+                    Game1.smallFont.MeasureString(label) * tabScale;
 
                 Vector2 labelPos =
                     new Vector2(
@@ -1026,24 +1014,26 @@ namespace ForageTrackerMod
                     textColor,
                     0f,
                     Vector2.Zero,
-                    scale,
+                    tabScale,
                     SpriteEffects.None,
                     1f);
 
                 x += tw + 2;
             }
 
+            // "+ New Map" sits flush at the right end; slight vertical inset
+            // so inactive tabs visually connect to the map below.
             _btnNewMapRect = new Rectangle(
-                _mapArea.Right - newMapWw,
-                tabY + 4,
-                newMapWw,
-                _ui.TabH - 4);
+                _mapArea.Right - newMapBtnW,
+                tabY + _ui.Pad / 2,
+                newMapBtnW,
+                _ui.TabH - _ui.Pad / 2);
 
             DrawButton(
                 b,
                 _btnNewMapRect,
                 EditorUIStrings.NewMap,
-                Color.White);
+                Color.White, _ui);
         }
 
         // ── Dropdown drawing ──────────────────────────────────────────────────
@@ -1055,50 +1045,52 @@ namespace ForageTrackerMod
             b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.5f);
             DrawBorder(b, r, _dropdownOpen ? Color.White : Color.Gray, 2);
             b.DrawString(Game1.smallFont, preview,
-                new Vector2(r.X + 6, r.Y + 8),
-                Color.White * 0.7f, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                new Vector2(r.X + 6, r.Y + (_ui.FieldH - _ui.LineH) / 2),
+                Color.White * 0.7f, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
             // Down-arrow indicator
             b.DrawString(Game1.smallFont, EditorUIStrings.DownDropdown,
-                new Vector2(r.Right - 20, r.Y + 8),
-                Color.White, 0f, Vector2.Zero, 0.6f, SpriteEffects.None, 1f);
+                new Vector2(r.Right - _ui.Pad * 2, r.Y + (_ui.FieldH - _ui.LineH) / 2),
+                Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
         }
 
         private void DrawDropdownList(SpriteBatch b)
         {
-            int x = _locDropdownRect.X;
-            int y = _locDropdownRect.Bottom;
-            int w = _locDropdownRect.Width;
-            int totalH = DropdownRowH * DropdownVisibleRows;
+            int x        = _locDropdownRect.X;
+            int y        = _locDropdownRect.Bottom;
+            int w        = _locDropdownRect.Width;
+            int rowH     = DropdownRowH;  // evaluated once — consistent per frame
+            int visible  = Math.Min(DropdownVisibleRows, _allLocations.Count - _dropdownScroll);
+            int totalH   = rowH * visible; // background exactly fits drawn rows
 
-            // Background panel
-            b.Draw(Game1.fadeToBlackRect,
-                new Rectangle(x, y, w, totalH), Color.Black * 0.9f);
+            // Background panel — exactly as tall as the rows we draw.
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(x, y, w, totalH), Color.Black * 0.9f);
             DrawBorder(b, new Rectangle(x, y, w, totalH), Color.White, 2);
 
-            int visible = Math.Min(DropdownVisibleRows, _allLocations.Count - _dropdownScroll);
             for (int i = 0; i < visible; i++)
             {
-                int   idx  = i + _dropdownScroll;
-                int   rowY = y + i * DropdownRowH;
-                var   row  = new Rectangle(x, rowY, w, DropdownRowH);
-                bool  hov  = row.Contains(Game1.getMouseX(), Game1.getMouseY());
+                int idx  = i + _dropdownScroll;
+                int rowY = y + i * rowH;
+                var row  = new Rectangle(x, rowY, w, rowH);
+                bool hov = row.Contains(Game1.getMouseX(), Game1.getMouseY());
 
                 if (hov)
                     b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.15f);
 
+                // Centre text vertically in the row.
+                float textY = rowY + (rowH - _ui.LineH) / 2f;
                 b.DrawString(Game1.smallFont, _allLocations[idx],
-                    new Vector2(x + 6, rowY + 6),
-                    Color.White, 0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
+                    new Vector2(x + 6, textY),
+                    Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
             }
 
-            // Scroll hint
+            // Scroll hint drawn below the list, not inside it.
             if (_allLocations.Count > DropdownVisibleRows)
             {
                 b.DrawString(Game1.smallFont,
                     $"{_dropdownScroll + 1}–{_dropdownScroll + visible} / {_allLocations.Count}",
-                    new Vector2(x + 4, y + totalH - 18),
-                    Color.White * 0.5f, 0f, Vector2.Zero, 0.55f, SpriteEffects.None, 1f);
+                    new Vector2(x + 4, y + totalH + 2),
+                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
             }
         }
 
@@ -1108,7 +1100,7 @@ namespace ForageTrackerMod
         {
             bool hasError = _newMapError.Length > 0;
             int dw = 360, dh = hasError ? 195 : 160;
-            int dx = (Game1.uiViewport.Width  - dw) / 2;
+            int dx = (Game1.uiViewport.Width - dw) / 2;
             int dy = (Game1.uiViewport.Height - dh) / 2;
 
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
@@ -1117,10 +1109,10 @@ namespace ForageTrackerMod
 
             b.DrawString(Game1.smallFont, EditorUIStrings.NewMapTitle,
                 new Vector2(dx + 16, dy + 16), Game1.textColor,
-                0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
+                0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
             var field = new Rectangle(dx + 16, dy + 52, dw - 32, 34);
-            DrawTextField(b, field, _newMapName, true);
+            DrawTextField(b, field, _newMapName, true, _ui);
 
             // Error message (duplicate name)
             if (hasError)
@@ -1128,14 +1120,14 @@ namespace ForageTrackerMod
                 b.DrawString(Game1.smallFont, _newMapError,
                     new Vector2(dx + 16, dy + 94),
                     new Color(220, 80, 80),
-                    0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
+                    0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
             }
 
-            var ok     = new Rectangle(dx + 16,       dy + dh - 52, (dw - 48) / 2, 36);
-            var cancel = new Rectangle(ok.Right + 16,  dy + dh - 52, (dw - 48) / 2, 36);
+            var ok = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
+            var cancel = new Rectangle(ok.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
 
-            DrawButton(b, ok, EditorUIStrings.Create, new Color(140, 220, 140));
-            DrawButton(b, cancel, EditorUIStrings.Cancel, new Color(220, 120, 120));
+            DrawButton(b, ok, EditorUIStrings.Create, new Color(140, 220, 140), _ui);
+            DrawButton(b, cancel, EditorUIStrings.Cancel, new Color(220, 120, 120), _ui);
         }
         private void DrawDeleteMapDialog(SpriteBatch b)
         {
@@ -1165,7 +1157,7 @@ namespace ForageTrackerMod
                 Color.White,
                 0f,
                 Vector2.Zero,
-                0.75f,
+                _ui.NormalScale,
                 SpriteEffects.None,
                 1f);
 
@@ -1187,13 +1179,13 @@ namespace ForageTrackerMod
                 b,
                 deleteBtn,
                EditorUIStrings.Delete,
-                new Color(220, 100, 80));
+                new Color(220, 100, 80), _ui);
 
             DrawButton(
                 b,
                 cancelBtn,
                 EditorUIStrings.CancelSimple,
-                new Color(140, 140, 140));
+                new Color(140, 140, 140), _ui);
         }
         // ── Input ─────────────────────────────────────────────────────────────
 
@@ -1239,18 +1231,18 @@ namespace ForageTrackerMod
             {
                 bool hasError = _newMapError.Length > 0;
                 int dw = 360, dh = hasError ? 195 : 160;
-                int dx = (Game1.uiViewport.Width  - dw) / 2;
+                int dx = (Game1.uiViewport.Width - dw) / 2;
                 int dy = (Game1.uiViewport.Height - dh) / 2;
-                var ok     = new Rectangle(dx + 16,       dy + dh - 52, (dw - 48) / 2, 36);
-                var cancel = new Rectangle(ok.Right + 16,  dy + dh - 52, (dw - 48) / 2, 36);
+                var ok = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
+                var cancel = new Rectangle(ok.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
 
                 if (ok.Contains(x, y) && _newMapName.Trim().Length > 0)
                     ConfirmNewMap();
                 else if (cancel.Contains(x, y))
                 {
                     _newMapDialogOpen = false;
-                    _newMapName       = "";
-                    _newMapError      = "";
+                    _newMapName = "";
+                    _newMapError = "";
                 }
                 return;
             }
@@ -1330,9 +1322,9 @@ namespace ForageTrackerMod
             if (_btnNewMapRect.Contains(x, y)) { _newMapDialogOpen = true; return; }
 
             // ── Sidebar buttons ───────────────────────────────────────────────
-            if (_btnAddRegionRect.Contains(x, y)) { AddRegion();       return; }
-            if (_btnDelRegionRect.Contains(x, y)) { DeleteSelected();  return; }
-            if (_btnColorRect.Contains(x, y))     { CycleColor();      return; }
+            if (_btnAddRegionRect.Contains(x, y)) { AddRegion(); return; }
+            if (_btnDelRegionRect.Contains(x, y)) { DeleteSelected(); return; }
+            if (_btnColorRect.Contains(x, y)) { CycleColor(); return; }
             if (_btnTextColorRect.Contains(x, y))
             {
                 CycleTextColor();
@@ -1344,8 +1336,8 @@ namespace ForageTrackerMod
                 UpdateTextScaleFromMouse(x);
                 return;
             }
-            if (_btnSaveRect.Contains(x, y))      { DoSave();          return; }
-            if (_btnCancelRect.Contains(x, y))    { exitThisMenu();    return; }
+            if (_btnSaveRect.Contains(x, y)) { DoSave(); return; }
+            if (_btnCancelRect.Contains(x, y)) { exitThisMenu(); return; }
             if (_opacitySliderRect.Contains(x, y))
             {
                 _draggingOpacity = true;
@@ -1400,18 +1392,18 @@ namespace ForageTrackerMod
             // Remove-location buttons (scrolled list)
             if (_sel >= 0 && _sel < _currentRegions.Count)
             {
-                var r     = _currentRegions[_sel];
-                int locListX  = _sideArea.X + _ui.Pad;
+                var r = _currentRegions[_sel];
+                int locListX = _sideArea.X + _ui.Pad;
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListW  = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
+                int locListW = _sideArea.Width - _ui.Pad * 2 - _locListScrollbarTrack.Width - 4;
 
                 for (int i = 0; i < _dynLocListVisibleRows; i++)
                 {
                     int idx = i + _locListScroll;
                     if (idx >= r.Locations.Count) break;
 
-                    int rowY       = locListY0 + i * LocListRowH;
-                    var locRect    = new Rectangle(locListX, rowY, locListW - 34, LocListRowH - 2);
+                    int rowY = locListY0 + i * LocListRowH;
+                    var locRect = new Rectangle(locListX, rowY, locListW - 34, LocListRowH - 2);
                     var removeRect = new Rectangle(locRect.Right + 4, rowY, 28, LocListRowH - 2);
 
                     if (removeRect.Contains(x, y))
@@ -1448,9 +1440,9 @@ namespace ForageTrackerMod
                 {
                     CommitName();
                     SelectRegion(hit);
-                    var sr      = ToScreen(_currentRegions[hit]);
-                    _handle     = GetHandle(sr, x, y, _edgeGrab);
-                    _dragging   = true;
+                    var sr = ToScreen(_currentRegions[hit]);
+                    _handle = GetHandle(sr, x, y, _edgeGrab);
+                    _dragging = true;
                     _dragAnchor = new Point(x, y);
                     _origL = _currentRegions[hit].Left;
                     _origT = _currentRegions[hit].Top;
@@ -1473,7 +1465,26 @@ namespace ForageTrackerMod
             _draggingTextScale = false;
             _handle = Handle.None;
         }
+        private Rectangle FitButtonRect(
+    string text,
+    int x,
+    int y,
+    int minWidth = 80)
+        {
+            float scale = _ui.NormalScale;
 
+            int textW =
+                (int)(Game1.smallFont.MeasureString(text).X * scale);
+
+            int width =
+                Math.Max(minWidth, textW + _ui.Pad * 2);
+
+            return new Rectangle(
+                x,
+                y,
+                width,
+                _ui.BtnH);
+        }
         public override void leftClickHeld(int x, int y)
         {
             if (_draggingOpacity)
@@ -1494,7 +1505,7 @@ namespace ForageTrackerMod
             }
             if (!_dragging || _sel < 0) return;
 
-            var r    = _currentRegions[_sel];
+            var r = _currentRegions[_sel];
             float dx = (x - _dragAnchor.X) / (float)_mapArea.Width;
             float dy = (y - _dragAnchor.Y) / (float)_mapArea.Height;
             const float MinFrac = 0.02f; // minimum region size as a fraction of map dimensions
@@ -1503,19 +1514,19 @@ namespace ForageTrackerMod
             {
                 case Handle.Move:
                     float w = _origR - _origL, h = _origB - _origT;
-                    r.Left   = Math.Clamp(_origL + dx, 0f, 1f - w);
-                    r.Top    = Math.Clamp(_origT + dy, 0f, 1f - h);
-                    r.Right  = r.Left + w;
-                    r.Bottom = r.Top  + h;
+                    r.Left = Math.Clamp(_origL + dx, 0f, 1f - w);
+                    r.Top = Math.Clamp(_origT + dy, 0f, 1f - h);
+                    r.Right = r.Left + w;
+                    r.Bottom = r.Top + h;
                     break;
                 case Handle.Left:
-                    r.Left   = Math.Clamp(_origL + dx, 0f, r.Right  - MinFrac); break;
+                    r.Left = Math.Clamp(_origL + dx, 0f, r.Right - MinFrac); break;
                 case Handle.Right:
-                    r.Right  = Math.Clamp(_origR + dx, r.Left + MinFrac, 1f);   break;
+                    r.Right = Math.Clamp(_origR + dx, r.Left + MinFrac, 1f); break;
                 case Handle.Top:
-                    r.Top    = Math.Clamp(_origT + dy, 0f, r.Bottom - MinFrac); break;
+                    r.Top = Math.Clamp(_origT + dy, 0f, r.Bottom - MinFrac); break;
                 case Handle.Bottom:
-                    r.Bottom = Math.Clamp(_origB + dy, r.Top + MinFrac, 1f);    break;
+                    r.Bottom = Math.Clamp(_origB + dy, r.Top + MinFrac, 1f); break;
             }
         }
 
@@ -1535,10 +1546,10 @@ namespace ForageTrackerMod
             // Location list scroll — active when mouse is over the list area
             if (_sel >= 0 && _sel < _currentRegions.Count)
             {
-                var r         = _currentRegions[_sel];
+                var r = _currentRegions[_sel];
                 int locListY0 = _locDropdownRect.Bottom + 4;
-                int locListH  = LocListRowH * _dynLocListVisibleRows;
-                var listArea  = new Rectangle(_sideArea.X + _ui.Pad, locListY0,
+                int locListH = LocListRowH * _dynLocListVisibleRows;
+                var listArea = new Rectangle(_sideArea.X + _ui.Pad, locListY0,
                     _sideArea.Width - _ui.Pad * 2, locListH);
 
                 if (listArea.Contains(mx, my))
@@ -1555,8 +1566,8 @@ namespace ForageTrackerMod
         {
             if (key == Keys.Escape)
             {
-                if (_dropdownOpen)      { _dropdownOpen = false; return; }
-                if (_newMapDialogOpen)  { _newMapDialogOpen = false; _newMapName = ""; _newMapError = ""; return; }
+                if (_dropdownOpen) { _dropdownOpen = false; return; }
+                if (_newMapDialogOpen) { _newMapDialogOpen = false; _newMapName = ""; _newMapError = ""; return; }
                 if (_confirmDeleteMapOpen)
                 {
                     _confirmDeleteMapOpen = false;
@@ -1571,7 +1582,7 @@ namespace ForageTrackerMod
             {
                 if (_newMapDialogOpen && _newMapName.Length > 0)
                 {
-                    _newMapName  = _newMapName[..^1];
+                    _newMapName = _newMapName[..^1];
                     _newMapError = "";
                 }
                 else if (_nameFocused && _fieldName.Length > 0)
@@ -1639,15 +1650,15 @@ namespace ForageTrackerMod
                 return;
             }
 
-            _newMapError      = "";
-            _editMaps[key]    = new List<MapRegionData>();
+            _newMapError = "";
+            _editMaps[key] = new List<MapRegionData>();
             _mapKeys.Add(key);
             _mapKeys.Sort();
 
-            _currentMapKey    = key;
+            _currentMapKey = key;
             _newMapDialogOpen = false;
-            _newMapName       = "";
-            _sel              = -1;
+            _newMapName = "";
+            _sel = -1;
 
             /*
             int idx = _mapKeys.IndexOf(key);
@@ -1656,25 +1667,21 @@ namespace ForageTrackerMod
                 _firstVisibleTab = idx;
             EnsureSelectedTabVisible();*/
         }
+
+        #region Tabs
         private int GetTabWidth(string mapKey)
         {
-            const float scale = 0.68f;
-            const int tabPadX = 18;
-
             int regionCount = _editMaps[mapKey].Count;
-
-            string label =
-                $"  {mapKey}  ({regionCount})";
-
+            string label = $"  {mapKey}  ({regionCount})";
             int width =
-                (int)(Game1.smallFont.MeasureString(label).X * scale)
-                + tabPadX * 2;
+                (int)Math.Ceiling(Game1.smallFont.MeasureString(label).X * _ui.NormalScale)
+                + _ui.Pad * 2;
 
-            return Math.Max(width, 80);
+            return Math.Max(width, _ui.BtnH * 2);
         }
         private int GetLastVisibleTab()
         {
-            int availableStart =  _mapArea.X + TabArrowW + 8;
+            int availableStart = _mapArea.X + TabArrowW + 8;
 
             int availableEnd =
                 _mapArea.Right
@@ -1759,10 +1766,11 @@ namespace ForageTrackerMod
                 }
             }
         }
+        #endregion
         private void SelectRegion(int idx)
         {
-            _sel           = idx;
-            _fieldName     = _currentRegions[idx].Name;
+            _sel = idx;
+            _fieldName = _currentRegions[idx].Name;
             _locListScroll = 0;   // reset scroll when switching regions
         }
 
@@ -1808,6 +1816,7 @@ namespace ForageTrackerMod
             _currentRegions.RemoveAt(_sel);
             _sel = -1; _fieldName = "";
         }
+
         private static Color GetContrastColor(Color bg)
         {
             float luminance =
@@ -1819,7 +1828,8 @@ namespace ForageTrackerMod
                 ? Color.Black
                 : Color.White;
         }
-        
+
+        #region Editor Config
         private void CycleTextColor()
         {
             if (_sel < 0)
@@ -1842,7 +1852,7 @@ namespace ForageTrackerMod
         private void CycleColor()
         {
             if (_sel < 0) return;
-            var r   = _currentRegions[_sel];
+            var r = _currentRegions[_sel];
             Color current = r.Color;
 
             int idx = Array.FindIndex(Palette, c =>
@@ -1879,7 +1889,7 @@ namespace ForageTrackerMod
 
             pct = Math.Clamp(pct, 0f, 1f);
 
-            _edgeGrab = (int)Math.Round( MathHelper.Lerp(2, 40, pct));
+            _edgeGrab = (int)Math.Round(MathHelper.Lerp(2, 40, pct));
         }
         private void UpdateOpacityFromMouse(int mouseX)
         {
@@ -1894,6 +1904,7 @@ namespace ForageTrackerMod
 
             _currentRegions[_sel].Opacity = (byte)(pct * 255);
         }
+        #endregion
         private void DoSave()
         {
             CommitName();
@@ -1905,7 +1916,7 @@ namespace ForageTrackerMod
             _cfg.Bindings = new Dictionary<string, string>(_bindings);
             _onSave(_cfg);
             exitThisMenu();
-            Game1.addHUDMessage(new HUDMessage( EditorUIStrings.RegionsSaved, HUDMessage.newQuest_type));
+            Game1.addHUDMessage(new HUDMessage(EditorUIStrings.RegionsSaved, HUDMessage.newQuest_type));
         }
 
         // ── Hit testing ───────────────────────────────────────────────────────
@@ -1929,19 +1940,19 @@ namespace ForageTrackerMod
         // ── Coordinate helpers ────────────────────────────────────────────────
 
         private Rectangle ToScreen(MapRegionData r) => new(
-            _mapArea.X + (int)(r.Left  * _mapArea.Width),
-            _mapArea.Y + (int)(r.Top   * _mapArea.Height),
-            Math.Max((int)((r.Right  - r.Left) * _mapArea.Width),  2),
-            Math.Max((int)((r.Bottom - r.Top)  * _mapArea.Height), 2));
+            _mapArea.X + (int)(r.Left * _mapArea.Width),
+            _mapArea.Y + (int)(r.Top * _mapArea.Height),
+            Math.Max((int)((r.Right - r.Left) * _mapArea.Width), 2),
+            Math.Max((int)((r.Bottom - r.Top) * _mapArea.Height), 2));
 
         // ── Drawing helpers ───────────────────────────────────────────────────
 
         private static void DrawBorder(SpriteBatch b, Rectangle r, Color c, int t)
         {
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Y,          r.Width,  t),        c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Bottom - t, r.Width,  t),        c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X,          r.Y,          t,        r.Height), c);
-            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.Right  - t, r.Y,          t,        r.Height), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, r.Width, t), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Bottom - t, r.Width, t), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.X, r.Y, t, r.Height), c);
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(r.Right - t, r.Y, t, r.Height), c);
         }
 
         private static void DrawHandles(SpriteBatch b, Rectangle r)
@@ -1949,36 +1960,47 @@ namespace ForageTrackerMod
             const int S = 10;
             void Sq(int x, int y) => b.Draw(Game1.fadeToBlackRect,
                 new Rectangle(x - S / 2, y - S / 2, S, S), Color.White);
-            Sq(r.X + r.Width  / 2, r.Y);
-            Sq(r.X + r.Width  / 2, r.Bottom);
-            Sq(r.X,                r.Y + r.Height / 2);
-            Sq(r.Right,            r.Y + r.Height / 2);
+            Sq(r.X + r.Width / 2, r.Y);
+            Sq(r.X + r.Width / 2, r.Bottom);
+            Sq(r.X, r.Y + r.Height / 2);
+            Sq(r.Right, r.Y + r.Height / 2);
         }
 
-        private static void DrawTextField(SpriteBatch b, Rectangle r, string text, bool active)
+        private static void DrawTextField(SpriteBatch b, Rectangle r, string text, bool active, UI ui)
         {
             b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.45f);
             DrawBorder(b, r, active ? Color.White : Color.Gray, 2);
 
             string visible = text;
-            while (Game1.smallFont.MeasureString(visible).X * 0.62f > r.Width - 10
+            while (Game1.smallFont.MeasureString(visible).X * ui.SmallScale > r.Width - 10
                    && visible.Length > 0)
                 visible = visible[1..];
 
             b.DrawString(Game1.smallFont, visible + (active ? "|" : ""),
                 new Vector2(r.X + 5, r.Y + 5),
-                Color.White, 0f, Vector2.Zero, 0.62f, SpriteEffects.None, 1f);
+                Color.White, 0f, Vector2.Zero, ui.NormalScale, SpriteEffects.None, 1f);
         }
 
-        private static void DrawButton(SpriteBatch b, Rectangle r, string label, Color tint)
+        private static void DrawButton(SpriteBatch b, Rectangle r, string label, Color tint, UI ui)
         {
             IClickableMenu.drawTextureBox(b, Game1.menuTexture,
                 new Rectangle(0, 256, 60, 60),
                 r.X, r.Y, r.Width, r.Height, tint, drawShadow: false);
-            var sz  = Game1.smallFont.MeasureString(label) * 0.68f;
-            var pos = new Vector2(r.X + (r.Width - sz.X) / 2f, r.Y + (r.Height - sz.Y) / 2f);
+
+            // Shrink text scale if the label is wider than the button interior.
+            // This makes every button consistent: same height, text always fits,
+            // same horizontal padding regardless of label length.
+            float scale = ui.NormalScale;
+            float maxTextW = r.Width - ui.BtnPadX * 2;
+            float textW = Game1.smallFont.MeasureString(label).X * scale;
+            if (textW > maxTextW && maxTextW > 0)
+                scale *= maxTextW / textW;
+
+            var sz = Game1.smallFont.MeasureString(label) * scale;
+            var pos = new Vector2(r.X + (r.Width - sz.X) / 2f,
+                                  r.Y + (r.Height - sz.Y) / 2f);
             b.DrawString(Game1.smallFont, label, pos, Game1.textColor,
-                0f, Vector2.Zero, 0.68f, SpriteEffects.None, 1f);
+                0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
         }
 
         /// <summary>
@@ -1987,27 +2009,30 @@ namespace ForageTrackerMod
         /// </summary>
         private void DrawStatusBanner(SpriteBatch b, string text, Color textColor, Color bgColor)
         {
-            const float scale = 0.6f;
-            var sz  = Game1.smallFont.MeasureString(text) * scale;
+            var sz = Game1.smallFont.MeasureString(text) * _ui.NormalScale;
             float bx = _sideArea.X + _ui.Pad;
             float by = _btnBindRect.Y - (int)sz.Y - _ui.Pad * 2;
-            int   bw = _sideArea.Width - _ui.Pad * 2;
-            int   bh = (int)sz.Y + _ui.Pad * 2;
+            int bw = _sideArea.Width - _ui.Pad * 2;
+            int bh = (int)sz.Y + _ui.Pad * 2;
 
             b.Draw(Game1.fadeToBlackRect,
                 new Rectangle((int)bx - 4, (int)by - 4, bw + 8, bh + 8),
                 bgColor);
             b.DrawString(Game1.smallFont, text,
                 new Vector2(bx, by + _ui.Pad * 0.5f), textColor,
-                0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
         }
 
         // ── Utility ───────────────────────────────────────────────────────────
 
         private static MapRegionData CloneRegion(MapRegionData r) => new()
         {
-            Name = r.Name, Locations = new(r.Locations),
-            Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom,
+            Name = r.Name,
+            Locations = new(r.Locations),
+            Left = r.Left,
+            Top = r.Top,
+            Right = r.Right,
+            Bottom = r.Bottom,
             ColorPacked = r.ColorPacked,
             TextColorPacked = r.TextColorPacked,
             Opacity = r.Opacity
@@ -2019,7 +2044,7 @@ namespace ForageTrackerMod
         /// so Quarry, modded locations, and anything else appears automatically.
         /// Also merges any names already tracked by ForageTracker.
         /// </summary>
-        private static List<string> BuildKnownLocations()
+        static List<string> BuildKnownLocations(IMonitor monitor)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var list = new List<string>();
@@ -2039,10 +2064,14 @@ namespace ForageTrackerMod
                 Add(loc.Name);
                 foreach (var building in loc.buildings)
                 {
+
                     var interior = building.indoors.Value;
-                    if (interior != null) Add(interior.Name);
+                    if (interior != null)
+                    {
+                        Add(interior.Name);
+                    }
                 }
-            }
+            } // ojo solo interires de farm esta haciendo
 
             // Also merge every name the ForageTracker has seen this session.
             // This covers locations that spawn forageables but aren't in
