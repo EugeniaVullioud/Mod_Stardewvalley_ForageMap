@@ -1,7 +1,8 @@
-using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Buildings;
+using System.Collections.Generic;
 using SObject = StardewValley.Object;
 
 namespace ForageTrackerMod
@@ -73,6 +74,14 @@ namespace ForageTrackerMod
         /// <summary>LocationName → per-location data.</summary>
         private readonly Dictionary<string, LocationData> _data = new();
 
+        /// <summary>
+        /// All QualifiedItemIds seen as forageables during the day-start scan.
+        /// Used to identify player-dropped items that have lost IsSpawnedObject.
+        /// A dropped forageable has the same item ID as the original — we use
+        /// this to decide whether to track it even without the spawn flag.
+        /// </summary>
+        private readonly HashSet<string> _knownForageableIds = new();
+
         // -------------------------------------------------------------------------
         // Constructor
         // -------------------------------------------------------------------------
@@ -93,6 +102,7 @@ namespace ForageTrackerMod
         public void ScanAllLocations()
         {
             _data.Clear();
+            _knownForageableIds.Clear();
             int total = 0;
 
             foreach (var location in GetAllLocations())
@@ -103,8 +113,14 @@ namespace ForageTrackerMod
                 ld.RebuildSummary();
                 _data[location.Name] = ld;
                 total += ld.Entries.Count;
+                // Record the item IDs so we can recognise them if dropped later.
+                foreach (var entry in ld.Entries)
+                    _knownForageableIds.Add(entry.ItemId);
             }
-            Debugger.DebugLog(_monitor, $"[ForageTracker] Day scan: {total} forageable(s) across {_data.Count} location(s).", LogLevel.Debug);
+
+            _monitor.Log(
+                $"[ForageTracker] Day scan: {total} forageable(s) across {_data.Count} location(s).",
+                LogLevel.Debug);
         }
 
         /// <summary>
@@ -120,33 +136,42 @@ namespace ForageTrackerMod
             entry.Picked = true;
             ld.RebuildSummary();   // O(n entries in this location) — only on actual pickup
 
-            Debugger.DebugLog(_monitor, $"[ForageTracker] Picked: {entry.DisplayName} @ {tile} in {locationName}.", LogLevel.Trace);
+            _monitor.Log(
+                $"[ForageTracker] Picked: {entry.DisplayName} @ {tile} in {locationName}.",
+                LogLevel.Trace);
         }
 
         /// <summary>
-        /// Marks a forageable as un-picked (e.g. the player dropped it back).
-        /// If the tile is already tracked and un-picked, this is a no-op.
-        /// If the tile is not tracked at all (new object placed mid-day),
-        /// the item is added as a new entry and the summary rebuilt.
+        /// Returns true if this QualifiedItemId was seen as a forageable at
+        /// day-start — used to detect player-dropped items that lost IsSpawnedObject.
         /// </summary>
-        public void MarkAdded(string locationName, Vector2 tile, string itemId, string displayName)
+        public bool IsKnownForageableId(string qualifiedItemId) =>
+            _knownForageableIds.Contains(qualifiedItemId);
+
+        /// <summary>
+        /// Adds or restores a forageable at the given tile in the given location.
+        /// Called when a player drops a forageable item back into the world.
+        ///
+        /// • If the tile was previously tracked and picked → un-pick it.
+        /// • If the tile is new → add a fresh entry.
+        /// Either way the summary is rebuilt so the tooltip updates immediately.
+        /// </summary>
+        public void MarkAdded(string locationName, Vector2 tile,
+                               string itemId, string displayName)
         {
             if (!_data.TryGetValue(locationName, out var ld))
             {
-                // Location had no forage — create a new slot for it.
                 ld = new LocationData();
                 _data[locationName] = ld;
             }
 
             if (ld.ByTile.TryGetValue(tile, out var existing))
             {
-                // Already tracked (was picked earlier) — just un-pick it.
-                if (!existing.Picked) return;
+                if (!existing.Picked) return;   // already present and un-picked
                 existing.Picked = false;
             }
             else
             {
-                // Brand-new tile (player dropped a forageable they had in inventory).
                 var entry = new ForageEntry
                 {
                     ItemId      = itemId,
@@ -156,11 +181,13 @@ namespace ForageTrackerMod
                 };
                 ld.Entries.Add(entry);
                 ld.ByTile[tile] = entry;
+                _knownForageableIds.Add(itemId);
             }
 
             ld.RebuildSummary();
-
-            Debugger.DebugLog(_monitor, $"[ForageTracker] Added/restored: {displayName} @ {tile} in {locationName}.", LogLevel.Trace);
+            _monitor.Log(
+                $"[ForageTracker] Added/restored: {displayName} @ {tile} in {locationName}.",
+                LogLevel.Trace);
         }
 
         /// <summary>

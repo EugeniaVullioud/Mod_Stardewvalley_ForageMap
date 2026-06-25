@@ -1,11 +1,15 @@
 using StardewValley;
 using StardewValley.Buildings;
 using StardewModdingAPI;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace ForageTrackerMod
 {
+    public enum LocationType
+    {
+        Outdoor,
+        FarmBuilding,   // Barn, Coop, FarmHouse, etc.
+        IndoorMap           // Saloon, ElliottHouse, SeedShop, etc.
+    }
     /// <summary>
     /// Builds and caches the full parent→child hierarchy of every GameLocation
     /// in the game world, including modded locations.
@@ -74,29 +78,7 @@ namespace ForageTrackerMod
         /// Wires up the monitor for debug logging. Call once in ModEntry.Entry.
         /// </summary>
         public static void Init(IMonitor monitor) => _monitor = monitor;
-        public static void DebugDump()
-        {
-            EnsureBuilt();
 
-            _monitor?.Log("===== LOCATION HIERARCHY DUMP =====", LogLevel.Debug);
-
-            foreach (var locationName in _byName.Keys.OrderBy(p => p))
-            {
-                var parent = _parent.TryGetValue(locationName, out var p)
-                    ? p ?? "<ROOT>"
-                    : "<MISSING>";
-
-                var children = _children.TryGetValue(locationName, out var c)
-                    ? string.Join(", ", c)
-                    : "";
-
-                _monitor?.Log(
-                    $"{locationName} | Parent={parent} | Children=[{children.Length}]",
-                    LogLevel.Debug);
-            }
-
-            _monitor?.Log("===== END HIERARCHY DUMP =====", LogLevel.Debug);
-        }
         /// <summary>
         /// Rebuilds the hierarchy from the live game world.
         /// Call on SaveLoaded and DayStarted.
@@ -116,6 +98,7 @@ namespace ForageTrackerMod
             }
 
             _built = true;
+            BuildKindCache();
 
             _monitor?.Log(
                 $"[LocationHierarchy] Built: {_byName.Count} locations, " +
@@ -193,32 +176,7 @@ namespace ForageTrackerMod
             EnsureBuilt();
             return _parent.TryGetValue(locationName, out var p) && p != null;
         }
-        /// <summary>
-        /// Returns true if the location is the interior of a building (e.g., FarmHouse, Barn, Coop).
-        /// </summary>
-        public static bool IsBuildingInterior(string locationName)
-        {
-            EnsureBuilt();
 
-            // A building interior is a location that:
-            // 1. Has a parent (so it's not a root outdoor location)
-            // 2. Exists in the live hierarchy
-            return _parent.TryGetValue(locationName, out var parent) && parent != null;
-        }
-
-        /// <summary>
-        /// Returns true if the location is a building itself (i.e., has an interior GameLocation).
-        /// </summary>
-        public static bool IsBuilding(string locationName)
-        {
-            EnsureBuilt();
-
-            // A building exists if it has a GameLocation with buildings attached
-            if (!_byName.TryGetValue(locationName, out var loc))
-                return false;
-
-            return loc.buildings != null && loc.buildings.Count > 0;
-        }
         /// <summary>
         /// Returns all location names known to the hierarchy.
         /// </summary>
@@ -271,7 +229,49 @@ namespace ForageTrackerMod
                 Visit(interior, parentName: name);
             }
         }
+        public static LocationType GetLocationType(string name)
+        {
+            EnsureBuilt();
 
+            if (!_byName.TryGetValue(name, out var loc))
+                return LocationType.Outdoor;
+            /*
+            if (_buildingInteriors.Contains(name))
+                return LocationType.FarmBuilding;*/
+
+            if (loc.IsOutdoors)
+                return LocationType.Outdoor;
+
+            return LocationType.IndoorMap;
+        }
+        private static readonly Dictionary<string, LocationType> _kindCache = new();
+        private static void BuildKindCache()
+        {
+            _kindCache.Clear();
+
+            foreach (var loc in Game1.locations)
+            {
+                if (loc == null) continue;
+                /*
+                if (_buildingInteriors.Contains(loc.Name))
+                    _kindCache[loc.Name] = LocationType.FarmBuilding;*/
+
+                else if (loc.IsOutdoors)
+                    _kindCache[loc.Name] = LocationType.Outdoor;
+
+                else
+                    _kindCache[loc.Name] = LocationType.IndoorMap;
+            }
+        }
+        public static LocationType GetKindFast(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return LocationType.IndoorMap; // safe default
+            if (_kindCache.TryGetValue(name, out var kind))
+                return kind;
+
+            return LocationType.IndoorMap; // safe fallback
+        }
         private static void EnsureBuilt()
         {
             if (!_built) Rebuild();

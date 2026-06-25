@@ -45,6 +45,7 @@ namespace ForageTrackerMod
             _config = helper.ReadConfig<ModConfig>();
             _tracker = new ForageTracker(Monitor);
 
+            LocationHierarchy.Init(Monitor);
             // Load region data — creates regions.json with defaults on first run
             _regionConfig = helper.Data.ReadJsonFile<MapRegionConfig>("regions.json")
                             ?? new MapRegionConfig();
@@ -162,6 +163,7 @@ namespace ForageTrackerMod
         {
             if (!_active) return;
             _tracker.ScanAllLocations();
+            LocationHierarchy.Rebuild();
             MapTooltipDrawer.RebuildLocationKeyCache();
         }
         /// <summary>
@@ -203,23 +205,66 @@ namespace ForageTrackerMod
 
         private void OnDayStarted(object? sender, DayStartedEventArgs e)
         {
+            LocationHierarchy.Rebuild();
             _tracker.ScanAllLocations();
             MapTooltipDrawer.RebuildLocationKeyCache();
         }
 
         private void OnObjectListChanged(object? sender, ObjectListChangedEventArgs e)
         {
+            // ── Item picked up ────────────────────────────────────────────────
             foreach (var (tile, obj) in e.Removed)
             {
-                if (!obj.IsSpawnedObject) continue;
+                // Outdoor spawned items: IsSpawnedObject = true (day-start scan).
+                // Indoor re-dropped items: IsSpawnedObject = false, but their
+                // QualifiedItemId is in _knownForageableIds from the day scan.
+                bool isTrackedSpawn   = obj.IsSpawnedObject;
+                bool isTrackedDropped = _tracker.IsKnownForageableId(obj.QualifiedItemId);
+
+                if (!isTrackedSpawn && !isTrackedDropped) continue;
+
                 _tracker.MarkPicked(e.Location.Name, tile);
-                Debugger.DebugLog(Monitor, $"[ForageTracker] Picked: {obj.DisplayName} @ {tile} in {e.Location.Name}", LogLevel.Debug);
-                // Rebuild the location key cache in case this location
-                // wasn't tracked before (e.g. first forageable of the day here).
+                Debugger.DebugLog(Monitor,
+                    $"[ForageTracker] Picked: {obj.DisplayName} " +
+                    $"(spawned={obj.IsSpawnedObject}) @ {tile} in {e.Location.Name}",
+                    LogLevel.Debug);
                 MapTooltipDrawer.RebuildLocationKeyCache();
-                // Positioner box size will change if line count changes —
-                // invalidate so it re-solves on the next hover frame.
                 TooltipPositioner.Invalidate();
+            }
+
+            // ── Item dropped ──────────────────────────────────────────────────
+            // When a player drops a forageable it lands as an Object via
+            // ObjectListChanged.Added. IsSpawnedObject is false on dropped items,
+            // so we identify forageables by QualifiedItemId against the set of
+            // IDs seen during the day-start scan.
+            //
+            // Outdoors: debris physics apply — the item becomes Debris mid-flight
+            // and lands as an Object. OnDebrisListChanged handles outdoors.
+            // Indoors:  no debris physics — the item goes directly into the
+            // location's object list. We handle it here.
+            //
+            // LocationHierarchy.IsIndoor covers all buildings including modded
+            // ones — no hardcoded location names needed.
+
+            var kind = LocationHierarchy.GetKindFast(e.Location.Name);
+
+            if ((int)kind >= (int)LocationType.Outdoor)
+            {
+                foreach (var (tile, obj) in e.Added)
+                {
+                    if (!_tracker.IsKnownForageableId(obj.QualifiedItemId)) continue;
+                    if (obj.IsSpawnedObject) continue; // day-start item, already tracked
+
+                    Debugger.DebugLog(Monitor,
+                        $"[ForageTracker] Indoor drop: {obj.DisplayName} " +
+                        $"@ {tile} in {e.Location.Name}",
+                        LogLevel.Debug);
+
+                    _tracker.MarkAdded(e.Location.Name, tile,
+                        obj.QualifiedItemId, obj.DisplayName);
+                    MapTooltipDrawer.RebuildLocationKeyCache();
+                    TooltipPositioner.Invalidate();
+                }
             }
         }
 

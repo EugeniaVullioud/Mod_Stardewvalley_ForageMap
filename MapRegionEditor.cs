@@ -1,4 +1,5 @@
 using ForageTrackerModSV;
+using ForageTrackerModSV.Compatibility;
 using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -7,6 +8,7 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 using StardewValley.TerrainFeatures;
+using System.Text.RegularExpressions;
 using xTile.Tiles;
 
 namespace ForageTrackerMod
@@ -191,6 +193,7 @@ namespace ForageTrackerMod
         private Rectangle _btnNewMapRect;
         private Rectangle _btnDelMapRect;          // "Delete this map tab" button
         private Rectangle _btnBindRect;            // "Bind to current map" button
+        private Rectangle _btnHoverMapRect;        // "Edit Map Hover Data Relationships" button
         private readonly List<Rectangle> _tabRects = new();  // one per _mapKeys entry
         private Rectangle _btnTextColorRect;
         private Rectangle _textScaleSliderRect;
@@ -369,6 +372,12 @@ namespace ForageTrackerMod
         {
             if (char.IsControl(c)) return;
 
+            if (_hoverPanelOpen)
+            {
+                if (_hoverFilterFocused) _hoverFilterText += c;
+                return; // panel owns all text input while open
+            }
+
             if (_newMapDialogOpen)
             {
                 _newMapName += c;
@@ -434,6 +443,7 @@ namespace ForageTrackerMod
                 + _ui.LabelH + _ui.SliderH + gap      // text scale label + slider
                 + _ui.LabelH + _ui.SliderH + gap * 2  // edge grab label + slider + separator
                 + _ui.BtnH + gap                    // bind + del map
+                + _ui.BtnH + gap                    // edit hover data relationships
                 + _ui.BtnH + gap                    // add + del region
                 + _ui.BtnH + gap                    // save
                 + _ui.BtnH + gap;                   // cancel
@@ -492,6 +502,11 @@ namespace ForageTrackerMod
             int half = (w - _ui.Pad) / 2;
             _btnBindRect = new Rectangle(x, y, half, _ui.BtnH);
             _btnDelMapRect = new Rectangle(x + half + _ui.Pad, y, half, _ui.BtnH);
+            y += _ui.BtnH + gap;
+
+            // Edit Map Hover Data Relationships (full width — opens the
+            // manual hoverable→location mapping panel for the current map)
+            _btnHoverMapRect = new Rectangle(x, y, w, _ui.BtnH);
             y += _ui.BtnH + gap;
 
             // Add + Delete Region (side by side)
@@ -856,6 +871,9 @@ namespace ForageTrackerMod
                 DrawStatusBanner(b, notice, Color.Yellow, new Color(0, 0, 0, 200));
             }
 
+            DrawButton(b, _btnHoverMapRect, EditorHoverableUIStrings.EditHoverMapping,
+                new Color(120, 170, 230), _ui);
+
             DrawButton(b, _btnAddRegionRect, EditorUIStrings.AddRegion, Color.White, _ui);
             DrawButton(b, _btnDelRegionRect, EditorUIStrings.Delete, _sel >= 0 ? Color.White : Color.Gray * 0.5f, _ui);
             DrawButton(b, _btnSaveRect, EditorUIStrings.Save, new Color(140, 220, 140), _ui);
@@ -872,6 +890,12 @@ namespace ForageTrackerMod
             // ── Delete map dialog ────────────────────────────────────────────────
             if (_confirmDeleteMapOpen)
                 DrawDeleteMapDialog(b);
+
+            // ── Hover Mapping panel — full-panel overlay, drawn above everything
+            // else in the editor (it is its own tab, not a small dialog) ──────
+            if (_hoverPanelOpen)
+                DrawHoverMappingPanel(b);
+
             drawMouse(b);
         }
 
@@ -1191,6 +1215,15 @@ namespace ForageTrackerMod
 
         public override void receiveLeftClick(int x, int y, bool playSound = true)
         {
+            // ── Hover Mapping panel takes absolute priority while open ────────
+            // It is a full editor tab, not a small dialog, so every click while
+            // it's open is routed to its own handler and nothing below runs.
+            if (_hoverPanelOpen)
+            {
+                ReceiveLeftClickHoverPanel(x, y);
+                return;
+            }
+
             // ── Delete confirmation ─────────────────────────────────
             if (_confirmDeleteMapOpen)
             {
@@ -1380,6 +1413,14 @@ namespace ForageTrackerMod
                 return;
             }
 
+            // Edit Map Hover Data Relationships — opens the manual mapping panel
+            if (_btnHoverMapRect.Contains(x, y))
+            {
+                OpenHoverMappingPanel();
+                Game1.playSound("bigSelect");
+                return;
+            }
+
             // Name field
             if (_nameFieldRect.Contains(x, y)) { _nameFocused = true; return; }
 
@@ -1534,6 +1575,12 @@ namespace ForageTrackerMod
         {
             int mx = Game1.getMouseX(), my = Game1.getMouseY();
 
+            if (_hoverPanelOpen)
+            {
+                ReceiveScrollHoverPanel(mx, my, direction);
+                return;
+            }
+
             if (_dropdownOpen)
             {
                 _dropdownScroll = Math.Clamp(
@@ -1566,6 +1613,12 @@ namespace ForageTrackerMod
         {
             if (key == Keys.Escape)
             {
+                if (_hoverPanelOpen)
+                {
+                    if (_hoverNewMapDropdownOpen) { _hoverNewMapDropdownOpen = false; return; }
+                    CloseHoverMappingPanel();
+                    return;
+                }
                 if (_dropdownOpen) { _dropdownOpen = false; return; }
                 if (_newMapDialogOpen) { _newMapDialogOpen = false; _newMapName = ""; _newMapError = ""; return; }
                 if (_confirmDeleteMapOpen)
@@ -1580,6 +1633,12 @@ namespace ForageTrackerMod
 
             if (key == Keys.Back)
             {
+                if (_hoverPanelOpen)
+                {
+                    if (_hoverFilterFocused && _hoverFilterText.Length > 0)
+                        _hoverFilterText = _hoverFilterText[..^1];
+                    return;
+                }
                 if (_newMapDialogOpen && _newMapName.Length > 0)
                 {
                     _newMapName = _newMapName[..^1];
@@ -1589,6 +1648,8 @@ namespace ForageTrackerMod
                     _fieldName = _fieldName[..^1];
                 return;
             }
+
+            if (_hoverPanelOpen) return; // panel handles its own input only
 
             if (key == Keys.Tab && _nameFocused)
             {
@@ -1905,6 +1966,465 @@ namespace ForageTrackerMod
             _currentRegions[_sel].Opacity = (byte)(pct * 255);
         }
         #endregion
+
+        // ═════════════════════════════════════════════════════════════════════
+        // ── Hover Mapping panel ─────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        //
+        // Manual replacement for MapPointResolver's algorithmic guessing.
+        // Two-sided list: hoverable map elements (left) ↔ internal locations
+        // (right). Clicking a hoverable then a location toggles a mapping
+        // between them. One hoverable can map to many locations. Mappings are
+        // stored per-map in HoverMappingStore (hoverMappings.json), scoped by
+        // _currentMapKey so switching the underlying editor's map tab also
+        // switches which mapping set this panel edits.
+        //
+        // All rects below are computed from _ui in LayoutHoverPanel(), called
+        // every time the panel opens — nothing here is a hardcoded pixel value.
+
+        private bool _hoverPanelOpen = false;
+
+        // Left list: hoverable element names for _currentMapKey (mapPage.points
+        // ∪ mapAreas[].Data.WorldPositions, deduplicated). Built once per map
+        // when the panel opens — these names don't change at runtime.
+        private List<string> _hoverElementNames = new();
+        private int _hoverLeftSel = -1;
+        private int _hoverLeftScroll = 0;
+
+        // Right list: same _allLocations source the main region editor uses.
+        private int _hoverRightScroll = 0;
+
+        // Live editing buffer for the currently selected hoverable's mapped
+        // locations. Mirrors HoverMappingStore until the panel commits a
+        // change, at which point it's written straight through (no separate
+        // "apply" step — toggling a checkbox saves immediately into the
+        // in-memory store; only the JSON file write is deferred to Save).
+        private HashSet<string> _hoverSelectedLocations = new(StringComparer.OrdinalIgnoreCase);
+
+        // Optional text filter for the (potentially very large) location list,
+        // per the "must remain usable with many locations" requirement.
+        private string _hoverFilterText = "";
+        private bool _hoverFilterFocused = false;
+        private List<string> _hoverFilteredLocations = new();
+
+        // Unused placeholder kept for the Escape-key guard above — this panel
+        // has no dropdown of its own today, but the flag keeps the input
+        // priority chain future-proof if one is added later.
+        private bool _hoverNewMapDropdownOpen = false;
+
+        // Layout rects — all derived from _ui, recomputed on open/resize.
+        private Rectangle _hoverPanelRect;
+        private Rectangle _hoverLeftListRect;
+        private Rectangle _hoverRightListRect;
+        private Rectangle _hoverFilterRect;
+        private Rectangle _btnHoverCloseRect;
+        private Rectangle _btnHoverResetRect;
+        private Rectangle _btnHoverClearRect;
+        private int _hoverRowH;
+        private int _hoverVisibleRows;
+
+        private void OpenHoverMappingPanel()
+        {
+            CommitName(); // flush any in-progress edit in the underlying editor first
+            _hoverPanelOpen = true;
+            _hoverFilterText = "";
+            _hoverFilterFocused = false;
+            RebuildHoverElementNames();
+            LayoutHoverPanel();
+            SelectHoverLeftIndex(_hoverElementNames.Count > 0 ? 0 : -1);
+        }
+
+        private void CloseHoverMappingPanel()
+        {
+            _hoverPanelOpen = false;
+        }
+
+        /// <summary>
+        /// Builds the left-side hoverable list for the current map: the union
+        /// of mapPage.points (via MapPageCompat) and mapAreas[].Data.WorldPositions
+        /// point names, deduplicated case-insensitively. This is the same data
+        /// MapPointResolver consumes, so anything resolvable today shows up
+        /// here for manual mapping.
+        /// </summary>
+        private void RebuildHoverElementNames()
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<string>();
+
+            void Add(string? name)
+            {
+                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name!))
+                    list.Add(name!);
+            }
+
+            if (_mapPage != null)
+            {
+                foreach (var point in MapPageCompat.GetPoints(_mapPage))
+                {
+                    var formated = FormatName(point?.name);
+                    Add(formated);
+                }
+                    
+                /*
+                try
+                {
+                    foreach (var area in _mapPage.mapAreas)
+                        foreach (var wp in area.Data.WorldPositions)
+                            Add(wp?.LocationName);
+                }
+                catch (Exception ex)
+                {
+                    _monitor?.Log($"[HoverPanel] WorldPositions read failed: {ex.Message}", LogLevel.Warn);
+                }*/
+            }
+
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            _hoverElementNames = list;
+            _hoverLeftScroll = 0;
+        }
+        public  string FormatName(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input;
+
+            // Remove underscore and everything after it
+            int underscoreIndex = input.IndexOf('_');
+            if (underscoreIndex >= 0)
+                input = input[..underscoreIndex];
+
+            int slashIndex = input.IndexOf('/');
+
+            if (slashIndex < 0)
+                return AddSpaces(input);
+
+            string left = input[..slashIndex];
+            string right = input[(slashIndex + 1)..];
+
+            // Special case: */Default
+            if (right.Equals("Default", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{AddSpaces(left)} (Own Location)";
+            }
+
+            // Normal case
+            return $"{AddSpaces(right)} ({AddSpaces(left)})";
+        }
+
+        private  string AddSpaces(string text)
+        {
+            return Regex.Replace(
+                text,
+                @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+                " ");
+        }
+        private void SelectHoverLeftIndex(int index)
+        {
+            _hoverLeftSel = index;
+            _hoverSelectedLocations.Clear();
+
+            if (index < 0 || index >= _hoverElementNames.Count) return;
+
+            string hoverName = _hoverElementNames[index];
+            HoverMappingStore.EnsureMap(_currentMapKey);
+            var existing = HoverMappingStore.GetLocations(_currentMapKey, hoverName);
+            if (existing != null)
+                foreach (var loc in existing)
+                    _hoverSelectedLocations.Add(loc);
+        }
+
+        /// <summary>
+        /// Writes the current _hoverSelectedLocations buffer back into the
+        /// in-memory mapping store for the selected hoverable. Called after
+        /// every toggle so the right-hand checkmarks and the underlying data
+        /// never drift apart; HoverMappingStore.Save() (on the main editor
+        /// Save, or the panel's own Reset) is what actually persists to disk.
+        /// </summary>
+        private void CommitHoverSelection()
+        {
+            if (_hoverLeftSel < 0 || _hoverLeftSel >= _hoverElementNames.Count) return;
+            string hoverName = _hoverElementNames[_hoverLeftSel];
+
+            var set = HoverMappingStore.EnsureMap(_currentMapKey);
+            var entry = set.Entries.FirstOrDefault(
+                e => string.Equals(e.HoverName, hoverName, StringComparison.OrdinalIgnoreCase));
+
+            if (_hoverSelectedLocations.Count == 0)
+            {
+                if (entry != null) set.Entries.Remove(entry);
+                return;
+            }
+
+            if (entry == null)
+            {
+                entry = new HoverMappingEntry { HoverName = hoverName };
+                set.Entries.Add(entry);
+            }
+            entry.Locations = _hoverSelectedLocations.ToList();
+        }
+
+        private void RebuildHoverFilteredLocations()
+        {
+            _hoverFilteredLocations = string.IsNullOrWhiteSpace(_hoverFilterText)
+                ? _allLocations
+                : _allLocations.Where(n => n.Contains(_hoverFilterText, StringComparison.OrdinalIgnoreCase)).ToList();
+            _hoverRightScroll = Math.Clamp(_hoverRightScroll, 0, Math.Max(0, _hoverFilteredLocations.Count - 1));
+        }
+
+        /// <summary>
+        /// Computes every rect for the panel from _ui — same single-source-of-
+        /// truth pattern as LayoutSidebar(). Two equal-width columns split the
+        /// panel area, each with its own scrollable list. Recomputed whenever
+        /// the panel opens so it always matches the current screen size and
+        /// SDV UI scale.
+        /// </summary>
+        private void LayoutHoverPanel()
+        {
+            int margin = _ui.Pad * 3;
+            _hoverPanelRect = new Rectangle(
+                margin, margin,
+                Game1.uiViewport.Width - margin * 2,
+                Game1.uiViewport.Height - margin * 2);
+
+            int pad = _ui.Pad;
+            int titleH = (int)Math.Ceiling(Game1.dialogueFont.MeasureString(EditorHoverableUIStrings.EditHoverMapping).Y * _ui.TitleScale);
+            int topY = _hoverPanelRect.Y + pad + titleH + pad;
+
+            // Top-right action buttons (Reset / Close), measured to fit labels.
+            int closeW = _ui.MeasureBtn(EditorHoverableUIStrings.Close);
+            int resetW = _ui.MeasureBtn(EditorHoverableUIStrings.ResetToDefault);
+            int clearW = _ui.MeasureBtn(EditorHoverableUIStrings.ClearMapping);
+
+            _btnHoverCloseRect = new Rectangle(_hoverPanelRect.Right - pad - closeW, _hoverPanelRect.Y + pad, closeW, _ui.BtnH);
+            _btnHoverResetRect = new Rectangle(_btnHoverCloseRect.X - pad - resetW, _hoverPanelRect.Y + pad, resetW, _ui.BtnH);
+            _btnHoverClearRect = new Rectangle(_btnHoverResetRect.X - pad - clearW, _hoverPanelRect.Y + pad, clearW, _ui.BtnH);
+
+            // Two columns, equal width, filling the remaining vertical space
+            // down to the bottom margin (minus a small footer hint strip).
+            int colW = (_hoverPanelRect.Width - pad * 3) / 2;
+            int listTop = topY;
+            int listBottom = _hoverPanelRect.Bottom - pad - _ui.LabelH;
+            int listH = Math.Max(_ui.RowH, listBottom - listTop);
+
+            _hoverLeftListRect = new Rectangle(_hoverPanelRect.X + pad, listTop, colW, listH);
+
+            // Right column reserves a filter field above its list.
+            int rightX = _hoverLeftListRect.Right + pad;
+            _hoverFilterRect = new Rectangle(rightX, listTop, colW, _ui.FieldH);
+            _hoverRightListRect = new Rectangle(rightX, listTop + _ui.FieldH + pad, colW, listH - _ui.FieldH - pad);
+
+            _hoverRowH = Math.Max(_ui.RowH, _ui.LineH + 4);
+            _hoverVisibleRows = Math.Max(1, _hoverLeftListRect.Height / _hoverRowH);
+
+            RebuildHoverFilteredLocations();
+        }
+
+        private void DrawHoverMappingPanel(SpriteBatch b)
+        {
+            // Dim everything behind the panel — it fully replaces interaction
+            // with the rest of the editor while open.
+            b.Draw(Game1.fadeToBlackRect, new Rectangle(0, 0, Game1.uiViewport.Width, Game1.uiViewport.Height), Color.Black * 0.55f);
+
+            IClickableMenu.drawTextureBox(b, Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                _hoverPanelRect.X, _hoverPanelRect.Y, _hoverPanelRect.Width, _hoverPanelRect.Height,
+                Color.White, drawShadow: true);
+
+            b.DrawString(Game1.dialogueFont, EditorHoverableUIStrings.EditHoverMapping,
+                new Vector2(_hoverPanelRect.X + _ui.Pad, _hoverPanelRect.Y + _ui.Pad),
+                Game1.textColor, 0f, Vector2.Zero, _ui.TitleScale, SpriteEffects.None, 1f);
+
+            DrawButton(b, _btnHoverClearRect, EditorHoverableUIStrings.ClearMapping, new Color(220, 140, 80), _ui);
+            DrawButton(b, _btnHoverResetRect, EditorHoverableUIStrings.ResetToDefault, new Color(220, 160, 100), _ui);
+            DrawButton(b, _btnHoverCloseRect, EditorHoverableUIStrings.Close, new Color(200, 200, 200), _ui);
+
+            // Map key label, so it's unambiguous which map's mappings are showing.
+            string mapLabel = $"{EditorUIStrings.Map}: {_currentMapKey}";
+            b.DrawString(Game1.smallFont, mapLabel,
+                new Vector2(_hoverPanelRect.X + _ui.Pad, _btnHoverCloseRect.Bottom + 2),
+                Game1.textColor * 0.8f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
+
+            DrawHoverLeftList(b);
+            DrawHoverRightList(b);
+
+            // Footer hint
+            string hint = EditorHoverableUIStrings.HoverMappingHint;
+            b.DrawString(Game1.smallFont, hint,
+                new Vector2(_hoverPanelRect.X + _ui.Pad, _hoverPanelRect.Bottom - _ui.Pad - _ui.LabelH),
+                Game1.textColor * 0.6f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
+        }
+
+        private void DrawHoverLeftList(SpriteBatch b)
+        {
+            var r = _hoverLeftListRect;
+            b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.35f);
+            DrawBorder(b, r, Color.Gray, 2);
+
+            int visible = Math.Min(_hoverVisibleRows, _hoverElementNames.Count - _hoverLeftScroll);
+            for (int i = 0; i < visible; i++)
+            {
+                int idx = i + _hoverLeftScroll;
+                var row = new Rectangle(r.X, r.Y + i * _hoverRowH, r.Width, _hoverRowH);
+                bool selected = idx == _hoverLeftSel;
+                bool hasMapping = HoverMappingStore.HasMapping(_currentMapKey, _hoverElementNames[idx]);
+
+                if (selected)
+                    b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.25f);
+                else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))
+                    b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.1f);
+
+                // Small left-edge tick for hoverables that already have a
+                // manual mapping, so users can see progress at a glance.
+                if (hasMapping)
+                    b.Draw(Game1.fadeToBlackRect, new Rectangle(row.X, row.Y, 4, row.Height), new Color(140, 220, 140));
+
+                b.DrawString(Game1.smallFont, _hoverElementNames[idx],
+                    new Vector2(row.X + 8, row.Y + (_hoverRowH - _ui.LineH) / 2f),
+                    selected ? Color.Yellow : Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
+            }
+
+            if (_hoverElementNames.Count > _hoverVisibleRows)
+            {
+                b.DrawString(Game1.smallFont,
+                    $"{_hoverLeftScroll + 1}–{_hoverLeftScroll + visible} / {_hoverElementNames.Count}",
+                    new Vector2(r.X + 4, r.Bottom + 2),
+                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
+            }
+
+            if (_hoverElementNames.Count == 0)
+            {
+                b.DrawString(Game1.smallFont, EditorHoverableUIStrings.NoHoverElements,
+                    new Vector2(r.X + 8, r.Y + 8),
+                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
+            }
+        }
+
+        private void DrawHoverRightList(SpriteBatch b)
+        {
+            DrawTextField(b, _hoverFilterRect,
+                _hoverFilterText.Length > 0 ? _hoverFilterText : EditorHoverableUIStrings.FilterLocations,
+                _hoverFilterFocused, _ui);
+
+            var r = _hoverRightListRect;
+            b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.35f);
+            DrawBorder(b, r, _hoverLeftSel >= 0 ? Color.Gray : Color.Gray * 0.4f, 2);
+
+            if (_hoverLeftSel < 0)
+            {
+                b.DrawString(Game1.smallFont, EditorHoverableUIStrings.SelectHoverableFirst,
+                    new Vector2(r.X + 8, r.Y + 8),
+                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
+                return;
+            }
+
+            int visible = Math.Min(_hoverVisibleRows, _hoverFilteredLocations.Count - _hoverRightScroll);
+            for (int i = 0; i < visible; i++)
+            {
+                int idx = i + _hoverRightScroll;
+                string locName = _hoverFilteredLocations[idx];
+                var row = new Rectangle(r.X, r.Y + i * _hoverRowH, r.Width, _hoverRowH);
+                bool isMapped = _hoverSelectedLocations.Contains(locName);
+
+                if (isMapped)
+                    b.Draw(Game1.fadeToBlackRect, row, new Color(140, 220, 140) * 0.25f);
+                else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))
+                    b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.1f);
+
+                // Checkbox glyph — reuses the same checkmark convention as
+                // elsewhere in the editor (✓ for bound state).
+                string box = isMapped ? "[x]" : "[ ]";
+                b.DrawString(Game1.smallFont, box,
+                    new Vector2(row.X + 6, row.Y + (_hoverRowH - _ui.LineH) / 2f),
+                    isMapped ? new Color(140, 220, 140) : Color.White * 0.6f,
+                    0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
+
+                float textX = row.X + 6 + Game1.smallFont.MeasureString("[x] ").X * _ui.NormalScale;
+                b.DrawString(Game1.smallFont, locName,
+                    new Vector2(textX, row.Y + (_hoverRowH - _ui.LineH) / 2f),
+                    Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
+            }
+
+            if (_hoverFilteredLocations.Count > _hoverVisibleRows)
+            {
+                b.DrawString(Game1.smallFont,
+                    $"{_hoverRightScroll + 1}–{_hoverRightScroll + visible} / {_hoverFilteredLocations.Count}",
+                    new Vector2(r.X + 4, r.Bottom + 2),
+                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
+            }
+        }
+
+        private void ReceiveLeftClickHoverPanel(int x, int y)
+        {
+            if (_btnHoverCloseRect.Contains(x, y)) { CloseHoverMappingPanel(); return; }
+
+            if (_btnHoverResetRect.Contains(x, y))
+            {
+                HoverMappingStore.ResetToDefault(_currentMapKey);
+                SelectHoverLeftIndex(_hoverLeftSel); // refresh checkmarks from the restored defaults
+                Game1.playSound("trashcan");
+                return;
+            }
+
+            if (_btnHoverClearRect.Contains(x, y))
+            {
+                _hoverSelectedLocations.Clear();
+                CommitHoverSelection();
+                Game1.playSound("trashcan");
+                return;
+            }
+
+            if (_hoverFilterRect.Contains(x, y)) { _hoverFilterFocused = true; return; }
+            _hoverFilterFocused = false;
+
+            // Left list — select a hoverable
+            if (_hoverLeftListRect.Contains(x, y))
+            {
+                int row = (y - _hoverLeftListRect.Y) / _hoverRowH;
+                int idx = row + _hoverLeftScroll;
+                if (idx >= 0 && idx < _hoverElementNames.Count)
+                {
+                    SelectHoverLeftIndex(idx);
+                    Game1.playSound("smallSelect");
+                }
+                return;
+            }
+
+            // Right list — toggle a location mapping for the selected hoverable
+            if (_hoverRightListRect.Contains(x, y) && _hoverLeftSel >= 0)
+            {
+                int row = (y - _hoverRightListRect.Y) / _hoverRowH;
+                int idx = row + _hoverRightScroll;
+                if (idx >= 0 && idx < _hoverFilteredLocations.Count)
+                {
+                    string locName = _hoverFilteredLocations[idx];
+                    if (!_hoverSelectedLocations.Add(locName))
+                        _hoverSelectedLocations.Remove(locName);
+
+                    CommitHoverSelection();
+                    Game1.playSound("smallSelect");
+                }
+                return;
+            }
+        }
+
+        private void ReceiveScrollHoverPanel(int mx, int my, int direction)
+        {
+            if (_hoverLeftListRect.Contains(mx, my))
+            {
+                _hoverLeftScroll = Math.Clamp(
+                    _hoverLeftScroll - Math.Sign(direction),
+                    0, Math.Max(0, _hoverElementNames.Count - _hoverVisibleRows));
+                return;
+            }
+
+            if (_hoverRightListRect.Contains(mx, my))
+            {
+                _hoverRightScroll = Math.Clamp(
+                    _hoverRightScroll - Math.Sign(direction),
+                    0, Math.Max(0, _hoverFilteredLocations.Count - _hoverVisibleRows));
+                return;
+            }
+        }
+
         private void DoSave()
         {
             CommitName();
@@ -1915,6 +2435,12 @@ namespace ForageTrackerMod
             // Persist bindings
             _cfg.Bindings = new Dictionary<string, string>(_bindings);
             _onSave(_cfg);
+
+            // Hover mappings are stored separately (hoverMappings.json) and are
+            // edited live in-place via HoverMappingStore, so they only need an
+            // explicit Save() call here, not inclusion in MapRegionConfig.
+            HoverMappingStore.Save();
+
             exitThisMenu();
             Game1.addHUDMessage(new HUDMessage(EditorUIStrings.RegionsSaved, HUDMessage.newQuest_type));
         }
