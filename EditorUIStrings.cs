@@ -130,4 +130,19 @@
 
         public const string RegionsSaved = "Forage Tracker: regions saved.";
     }
+
+    public static class EditorHoverableUIStrings
+    {
+        public const string EditHoverMapping = "Edit Map Hover Data Relationships";
+        public const string Close = "Close";
+        public const string ResetToDefault = "Reset to Default";
+        public const string ClearMapping = "Clear";
+        public const string FilterLocations = "Filter locations...";
+        public const string SelectHoverableFirst = "Select a hoverable element on the left first.";
+        public const string NoHoverElements = "No hoverable elements found for this map.";
+        public const string HoverMappingHint =
+            "Click a hoverable on the left, then check one or more locations on the right to map them. " +
+            "Click a checked location again to unmap it.";
+
+    }
 }
