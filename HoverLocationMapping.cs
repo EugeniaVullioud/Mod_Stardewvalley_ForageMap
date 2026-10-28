@@ -43,11 +43,22 @@ namespace ForageTrackerMod
     }
 
     /// <summary>
-    /// Loads/saves hoverMappings.json and provides fast lookup used by
+    /// Loads/saves hoverMappings.json and provides lookup used by
     /// MapPointResolver.ResolveAll(). This is the single source of truth for
     /// hover → location resolution; the old scoring algorithm in
     /// MapPointResolver is kept only as a fallback for hoverables that have
     /// not yet been manually mapped (see MapPointResolver.ResolveAll).
+    ///
+    /// ── ON CACHING ──────────────────────────────────────────────────────────
+    /// An earlier version of this store kept a second "_lookup" dictionary
+    /// alongside Mappings purely to speed up reads. That second copy went
+    /// stale whenever the editor panel mutated Mappings directly (via
+    /// EnsureMap) without rebuilding the cache, which is exactly what caused
+    /// assignments made in the editor to silently disappear on the next
+    /// selection. There is now exactly one copy of the data (Mappings) and
+    /// every read (GetLocations) goes through it directly — a dictionary
+    /// lookup plus a short linear scan over one map's entries, which is cheap
+    /// enough that a cache bought nothing but a second place for bugs to hide.
     /// </summary>
     public static class HoverMappingStore
     {
@@ -56,11 +67,6 @@ namespace ForageTrackerMod
         private static IModHelper? _helper;
         private static IMonitor? _monitor;
         private static HoverMappingConfig _cfg = new();
-
-        // mapKey → (hoverName → locations), rebuilt whenever _cfg changes,
-        // so editor saves and tooltip lookups never re-scan the entry list.
-        private static readonly Dictionary<string, Dictionary<string, List<string>>> _lookup =
-            new(StringComparer.OrdinalIgnoreCase);
 
         public static void Init(IModHelper helper, IMonitor monitor)
         {
@@ -75,31 +81,48 @@ namespace ForageTrackerMod
         {
             if (_helper == null) return;
             _cfg = _helper.Data.ReadJsonFile<HoverMappingConfig>(FileName) ?? new HoverMappingConfig();
-            RebuildLookup();
+
+            if (_cfg.Mappings.Count == 0)
+            {
+                var defaults = CreateDefaultConfig();
+                _monitor?.Log("[HoverMappingStore] CreateDefaultConfig", LogLevel.Debug);
+
+                _cfg.Mappings = defaults.Mappings;
+                _cfg.Defaults = defaults.Defaults;
+
+                Save();
+            }
+            else
+            {
+                _monitor?.Log("[HoverMappingStore] Has Mapping", LogLevel.Debug);
+
+            }
         }
 
         public static void Save()
         {
             if (_helper == null) return;
             _helper.Data.WriteJsonFile(FileName, _cfg);
-            RebuildLookup();
             _monitor?.Log("[HoverMappingStore] Saved hoverMappings.json", LogLevel.Debug);
         }
 
         /// <summary>
         /// Returns the manually-mapped locations for a hoverable on the given
         /// map, or null if no manual mapping exists for it (caller should then
-        /// fall back to the legacy resolver).
+        /// fall back to the legacy resolver). Always reads live from Mappings —
+        /// see the class remarks for why there is no separate cache.
         /// </summary>
         public static List<string>? GetLocations(string mapKey, string hoverName)
         {
             if (string.IsNullOrEmpty(mapKey) || string.IsNullOrEmpty(hoverName))
                 return null;
 
-            return _lookup.TryGetValue(mapKey, out var byHover)
-                && byHover.TryGetValue(hoverName, out var locs)
-                ? locs
-                : null;
+            if (!_cfg.Mappings.TryGetValue(mapKey, out var set))
+                return null;
+
+            var entry = set.Entries.FirstOrDefault(
+                e => string.Equals(e.HoverName, hoverName, StringComparison.OrdinalIgnoreCase));
+            return entry?.Locations;
         }
 
         public static bool HasMapping(string mapKey, string hoverName) =>
@@ -145,10 +168,20 @@ namespace ForageTrackerMod
         /// </summary>
         public static void ResetToDefault(string mapKey)
         {
-            _cfg.Mappings[mapKey] = _cfg.Defaults.TryGetValue(mapKey, out var def)
-                ? CloneSet(def)
-                : new HoverMappingSet();
-            RebuildLookup();
+            if (string.IsNullOrWhiteSpace(mapKey)) return;
+            _monitor?.Log("[HoverMappingStore] ResetToDefault " + mapKey, LogLevel.Debug);
+
+            if (_cfg.Defaults.TryGetValue(mapKey, out var defaults) && defaults != null)
+            {
+                _cfg.Mappings[mapKey] = CloneSet(defaults);
+            }
+            else
+            {
+                _monitor?.Log($"[HoverMappingStore] No defaults found for '{mapKey}'", LogLevel.Warn);
+                _cfg.Mappings[mapKey] = new HoverMappingSet();
+            }
+
+            Save();
         }
 
         private static HoverMappingSet CloneSet(HoverMappingSet src) => new()
@@ -158,19 +191,70 @@ namespace ForageTrackerMod
                 .ToList()
         };
 
-        private static void RebuildLookup()
+
+        /// <summary>
+        /// Creates an empty default config. Actual defaults are seeded at runtime
+        /// by SeedFromResolver() once MapPointResolver has built its index from
+        /// the live MapPage — this is the only way to get the correct point.name
+        /// values that appear in mapPage.points.
+        /// </summary>
+        private static HoverMappingConfig CreateDefaultConfig() => new HoverMappingConfig();
+
+        /// <summary>
+        /// Seeds the mapping for an editor map key from MapPointResolver's built index.
+        /// Called the first time a map tab is viewed so the player sees useful defaults.
+        ///
+        /// Uses the EXACT point.name strings from mapPage.points as HoverName values.
+        /// Hardcoded display names cannot be used because they differ by game version
+        /// and Content Patcher mods. The resolver provides best-guess location lists.
+        ///
+        /// Safe to call multiple times — skips keys that already have entries.
+        /// </summary>
+        public static void SeedFromResolver(string mapKey, StardewValley.Menus.MapPage mapPage, ForageTracker? tracker)
         {
-            _lookup.Clear();
-            foreach (var (mapKey, set) in _cfg.Mappings)
+            if (_helper == null || mapPage == null) return;
+
+            MapPointResolver.EnsureBuilt(mapPage);
+            var set = EnsureMap(mapKey);
+            bool mappingsChanged = false;
+
+            // Seed missing parent entries without overwriting manual mappings.
+            var points = ForageTrackerModSV.Compatibility.MapPageCompat.GetPoints(mapPage);
+
+            foreach (var point in points)
             {
-                var byHover = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var entry in set.Entries)
+                if (string.IsNullOrWhiteSpace(point.name)) continue;
+
+                bool exists = set.Entries.Any(e => string.Equals(e.HoverName, point.name, StringComparison.OrdinalIgnoreCase));
+
+                if (exists) continue;
+
+                var resolved = MapPointResolver.ResolveAll(mapKey, point.name, tracker);
+
+                if (resolved.Count == 0) continue;
+
+                set.Entries.Add(new HoverMappingEntry
                 {
-                    if (string.IsNullOrEmpty(entry.HoverName)) continue;
-                    byHover[entry.HoverName] = entry.Locations;
-                }
-                _lookup[mapKey] = byHover;
+                    HoverName = point.name,
+                    Locations = resolved.Distinct(
+                    StringComparer.OrdinalIgnoreCase).ToList()
+                });
+
+                mappingsChanged = true;
             }
+
+            // Ensure defaults contain the seeded parent-child relationships.
+            if (!_cfg.Defaults.TryGetValue(mapKey, out var defaults) || defaults == null || (defaults.Entries.Count == 0 && set.Entries.Count > 0))
+            {
+                _cfg.Defaults[mapKey] = CloneSet(set);
+                mappingsChanged = true;
+            }
+
+            if (mappingsChanged) Save();
+
+            _monitor?.Log($"[HoverMappingStore] Seeded map '{mapKey}': " + $"{set.Entries.Count} mapping entries, " + $"{_cfg.Defaults[mapKey].Entries.Count} default entries", LogLevel.Debug);
+
         }
+
     }
 }

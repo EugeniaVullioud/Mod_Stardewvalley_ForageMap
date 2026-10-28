@@ -1,12 +1,7 @@
 using ForageTrackerModSV.Compatibility;
 using StardewModdingAPI;
 using StardewValley;
-using StardewValley.GameData.Pets;
 using StardewValley.Menus;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using static StardewValley.LocationRequest;
 
 namespace ForageTrackerMod
 {
@@ -560,17 +555,37 @@ namespace ForageTrackerMod
             int slash = pointName.IndexOf('/');
             return slash > 0 ? pointName[..slash] : pointName;
         }
+        /// <summary>
+        /// Returns true if the candidate is a reasonable resolution target for
+        /// this point. The check is deliberately permissive — the scorer handles
+        /// specificity. We only reject candidates that are completely unrelated
+        /// to the point's area cluster.
+        ///
+        /// Previous implementation used string containment of the area prefix,
+        /// which incorrectly rejected "ElliottHouse" for "Beach/ElliottCabin"
+        /// because "ElliottHouse" doesn't contain the string "Beach".
+        /// </summary>
         private static bool InSameAreaScope(string pointName, string candidate)
         {
-            string area = GetAreaPrefix(pointName);
-
-            // enforce namespace rule first
-            if (!candidate.Contains(area, StringComparison.OrdinalIgnoreCase))
+            // If we have spatial cluster data for this point, check membership
+            // (candidate or its parent is in the cluster).
+            if (_pointToLocations.TryGetValue(pointName, out var clusterLocs))
             {
-                // allow exceptions only for exact SDV matches
-                return false;
+                if (clusterLocs.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+                    return true;
+
+                // Child of a cluster member is also in scope
+                string? parent = LocationHierarchy.GetParent(candidate);
+                if (parent != null && clusterLocs.Contains(parent, StringComparer.OrdinalIgnoreCase))
+                    return true;
+
+                // If cluster data exists, reject anything outside it
+                // (prevents broad cross-area contamination)
+                if (clusterLocs.Count > 0)
+                    return false;
             }
 
+            // No cluster data yet — fall back to permissive (scorer will rank)
             return true;
         }
         private static string NormalizeLocation(string name)

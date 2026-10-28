@@ -1,15 +1,12 @@
 using ForageTrackerModSV;
 using ForageTrackerModSV.Compatibility;
-using ForageTrackerModSV.Debug;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
-using StardewValley.TerrainFeatures;
 using System.Text.RegularExpressions;
-using xTile.Tiles;
 
 namespace ForageTrackerMod
 {
@@ -93,16 +90,16 @@ namespace ForageTrackerMod
 
                 // All heights measured from the actual rendered line at NormalScale
                 // so they stay proportional when textScale changes.
-                u.LineH   = (int)Math.Ceiling(Game1.smallFont.LineSpacing * u.NormalScale);
+                u.LineH = (int)Math.Ceiling(Game1.smallFont.LineSpacing * u.NormalScale);
                 // vpad = equal top/bottom padding inside controls, proportional to text.
-                int vpad  = Math.Max(3, u.LineH / 4);
-                u.LabelH  = u.LineH + 2;                    // label fits one line + tiny gap
-                u.FieldH  = u.LineH + vpad * 2;             // field: text + equal top/bottom pad
-                u.RowH    = u.LineH + vpad;                  // list row: compact
+                int vpad = Math.Max(3, u.LineH / 4);
+                u.LabelH = u.LineH + 2;                    // label fits one line + tiny gap
+                u.FieldH = u.LineH + vpad * 2;             // field: text + equal top/bottom pad
+                u.RowH = u.LineH + vpad;                  // list row: compact
                 u.SliderH = u.LineH + vpad;                  // slider track same as row
-                u.BtnH    = u.LineH + vpad * 4;             // button: generous vertical padding
-                u.TabH    = u.BtnH;
-                u.Pad     = Math.Max(6, u.LineH / 2);
+                u.BtnH = u.LineH + vpad * 4;             // button: generous vertical padding
+                u.TabH = u.BtnH;
+                u.Pad = Math.Max(6, u.LineH / 2);
                 u.BtnPadX = Math.Max(10, u.LineH);
                 return u;
             }
@@ -257,18 +254,13 @@ namespace ForageTrackerMod
             _edgeGrab = Math.Max(2, cfg.EdgeGrabPixels);
 
             // Deep-copy all maps so edits don't affect live data until Save
-            _editMaps = cfg.RegionsByMap.ToDictionary(
-                kv => kv.Key,
-                kv => kv.Value.Select(CloneRegion).ToList());
+            _editMaps = cfg.RegionsByMap.ToDictionary(kv => kv.Key, kv => kv.Value.Select(CloneRegion).ToList());
 
             // Ensure at least one map exists
             if (_editMaps.Count == 0) _editMaps["Town"] = new List<MapRegionData>();
 
-
             // Load bindings (mapKey → SDV map key string)
-            _bindings = cfg.Bindings != null
-                ? new Dictionary<string, string>(cfg.Bindings)
-                : new Dictionary<string, string>();
+            _bindings = cfg.Bindings != null ? new Dictionary<string, string>(cfg.Bindings) : new Dictionary<string, string>();
 
             _mapKeys = _editMaps.Keys.OrderBy(k => k).ToList();
 
@@ -276,12 +268,11 @@ namespace ForageTrackerMod
 
             if (boundTab != null && _mapKeys.Contains(boundTab))
             {
-                _currentMapKey = boundTab;
+                _currentMapKey = boundTab; // SeedCurrentMap() is called after _mapPage is constructed below
             }
             else
             {
-                // Graceful fallback
-                _currentMapKey = _mapKeys[0];
+                _currentMapKey = _mapKeys[0]; // Graceful fallback
             }
             EnsureSelectedTabVisible();
             ClampTabViewport();
@@ -329,6 +320,9 @@ namespace ForageTrackerMod
             _mapPage = new MapPage(mapX, mapY, mapW, mapH);
             _mapArea = MapRenderUtility.ComputeActualMapRect(_mapPage);
 
+            // Seed default hover mappings for the initial tab now that _mapPage exists.
+            HoverMappingStore.SeedFromResolver(_currentMapKey, _mapPage, MapTooltipDrawer.Tracker);
+
             MapTooltipDrawer.LastLiveMapRect ??= new Rectangle(mapX, mapY, mapW, mapH);
 
             // ── Step 2: sidebar — right of _mapArea, never overlapping it ─────
@@ -345,16 +339,14 @@ namespace ForageTrackerMod
 
             LayoutSidebar();
         }
-        private string? FindTabBoundToCurrentMap()
+        string? FindTabBoundToCurrentMap()
         {
             string liveMapKey = MapKeyHelper.GetCurrentMapKey();
 
             foreach (var pair in _bindings)
             {
-                if (pair.Value == liveMapKey)
-                    return pair.Key;
+                if (pair.Value == liveMapKey) return pair.Key;
             }
-
             return null;
         }
         // ── Suppress the farm-name banner that SDV draws over full-screen menus ─
@@ -374,7 +366,11 @@ namespace ForageTrackerMod
 
             if (_hoverPanelOpen)
             {
-                if (_hoverFilterFocused) _hoverFilterText += c;
+                if (_hoverFilterFocused)
+                {
+                    _hoverFilterText += c;
+                    OnHoverFilterTextChanged();
+                }
                 return; // panel owns all text input while open
             }
 
@@ -383,8 +379,7 @@ namespace ForageTrackerMod
                 _newMapName += c;
                 _newMapError = ""; // clear error as soon as they type
             }
-            else if (_nameFocused)
-                _fieldName += c;
+            else if (_nameFocused) _fieldName += c;
         }
 
         // ── Layout ────────────────────────────────────────────────────────────
@@ -1080,12 +1075,12 @@ namespace ForageTrackerMod
 
         private void DrawDropdownList(SpriteBatch b)
         {
-            int x        = _locDropdownRect.X;
-            int y        = _locDropdownRect.Bottom;
-            int w        = _locDropdownRect.Width;
-            int rowH     = DropdownRowH;  // evaluated once — consistent per frame
-            int visible  = Math.Min(DropdownVisibleRows, _allLocations.Count - _dropdownScroll);
-            int totalH   = rowH * visible; // background exactly fits drawn rows
+            int x = _locDropdownRect.X;
+            int y = _locDropdownRect.Bottom;
+            int w = _locDropdownRect.Width;
+            int rowH = DropdownRowH;  // evaluated once — consistent per frame
+            int visible = Math.Min(DropdownVisibleRows, _allLocations.Count - _dropdownScroll);
+            int totalH = rowH * visible; // background exactly fits drawn rows
 
             // Background panel — exactly as tall as the rows we draw.
             b.Draw(Game1.fadeToBlackRect, new Rectangle(x, y, w, totalH), Color.Black * 0.9f);
@@ -1093,9 +1088,9 @@ namespace ForageTrackerMod
 
             for (int i = 0; i < visible; i++)
             {
-                int idx  = i + _dropdownScroll;
+                int idx = i + _dropdownScroll;
                 int rowY = y + i * rowH;
-                var row  = new Rectangle(x, rowY, w, rowH);
+                var row = new Rectangle(x, rowY, w, rowH);
                 bool hov = row.Contains(Game1.getMouseX(), Game1.getMouseY());
 
                 if (hov)
@@ -1342,6 +1337,7 @@ namespace ForageTrackerMod
                         _currentMapKey =
                             _mapKeys[mapIndex];
 
+                        SeedCurrentMap();
                         EnsureSelectedTabVisible();
 
                         Game1.playSound("smallSelect");
@@ -1500,6 +1496,8 @@ namespace ForageTrackerMod
 
         public override void releaseLeftClick(int x, int y)
         {
+            _draggingHoverLeftScroll = false;
+            _draggingHoverRightScroll = false;
             _dragging = false;
             _draggingEdgeGrab = false;
             _draggingOpacity = false;
@@ -1528,6 +1526,17 @@ namespace ForageTrackerMod
         }
         public override void leftClickHeld(int x, int y)
         {
+            if (_draggingHoverLeftScroll)
+            {
+                _hoverLeftScroll = ScrollOffsetFromTrackY(_hoverLeftScrollTrackRect, _hoverElementNames.Count, _hoverLeftVisibleRows, y);
+                return;
+            }
+            if (_draggingHoverRightScroll)
+            {
+                _hoverRightScroll = ScrollOffsetFromTrackY(_hoverRightScrollTrackRect, _hoverFilteredLocations.Count, _hoverRightVisibleRows, y);
+                return;
+            }
+
             if (_draggingOpacity)
             {
                 UpdateOpacityFromMouse(x);
@@ -1636,7 +1645,10 @@ namespace ForageTrackerMod
                 if (_hoverPanelOpen)
                 {
                     if (_hoverFilterFocused && _hoverFilterText.Length > 0)
+                    {
                         _hoverFilterText = _hoverFilterText[..^1];
+                        OnHoverFilterTextChanged();
+                    }
                     return;
                 }
                 if (_newMapDialogOpen && _newMapName.Length > 0)
@@ -1695,10 +1707,23 @@ namespace ForageTrackerMod
             _sel = -1;
             _fieldName = "";
 
+            SeedCurrentMap();
             EnsureSelectedTabVisible();
 
             Game1.playSound("trashcan");
         }
+        /// <summary>
+        /// Seeds default hover mappings for the current map tab if none exist yet.
+        /// Calls HoverMappingStore.SeedFromResolver which uses MapPointResolver's
+        /// built index to generate defaults from the exact point.name values in
+        /// mapPage.points. Safe to call multiple times — skips if already seeded.
+        /// </summary>
+        private void SeedCurrentMap()
+        {
+            if (_mapPage == null) return;
+            HoverMappingStore.SeedFromResolver(_currentMapKey, _mapPage, MapTooltipDrawer.Tracker);
+        }
+
         private void ConfirmNewMap()
         {
             string key = _newMapName.Trim();
@@ -2014,14 +2039,29 @@ namespace ForageTrackerMod
 
         // Layout rects — all derived from _ui, recomputed on open/resize.
         private Rectangle _hoverPanelRect;
-        private Rectangle _hoverLeftListRect;
-        private Rectangle _hoverRightListRect;
+        private Rectangle _hoverInstructionsRect;     // hint text, now ABOVE both lists
+        private Rectangle _hoverLeftListRect;         // left list content area (scrollbar excluded)
+        private Rectangle _hoverRightListRect;        // right list content area (scrollbar excluded)
+        private Rectangle _hoverLeftScrollTrackRect;  // left list's scrollbar track
+        private Rectangle _hoverRightScrollTrackRect; // right list's scrollbar track
         private Rectangle _hoverFilterRect;
         private Rectangle _btnHoverCloseRect;
         private Rectangle _btnHoverResetRect;
         private Rectangle _btnHoverClearRect;
         private int _hoverRowH;
-        private int _hoverVisibleRows;
+
+        // Visible-row counts are computed PER LIST from that list's own rect
+        // height — the two lists are not guaranteed to be the same height
+        // (the right column loses height to the filter field above it), so
+        // sharing one count between them caused the right list to render rows
+        // past its own bottom edge and made its scroll clamp wrong.
+        private int _hoverLeftVisibleRows;
+        private int _hoverRightVisibleRows;
+
+        // Scrollbar thumb dragging — same _dragging-flag pattern the region
+        // resize/move handles already use (see leftClickHeld/releaseLeftClick).
+        private bool _draggingHoverLeftScroll = false;
+        private bool _draggingHoverRightScroll = false;
 
         private void OpenHoverMappingPanel()
         {
@@ -2049,40 +2089,28 @@ namespace ForageTrackerMod
         private void RebuildHoverElementNames()
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             var list = new List<string>();
 
             void Add(string? name)
             {
-                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name!))
-                    list.Add(name!);
+                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name)) list.Add(name);
             }
 
             if (_mapPage != null)
             {
                 foreach (var point in MapPageCompat.GetPoints(_mapPage))
                 {
-                    var formated = FormatName(point?.name);
-                    Add(formated);
+                    // Keep the exact name used by HoverMappingStore.
+                    Add(point?.name);
                 }
-                    
-                /*
-                try
-                {
-                    foreach (var area in _mapPage.mapAreas)
-                        foreach (var wp in area.Data.WorldPositions)
-                            Add(wp?.LocationName);
-                }
-                catch (Exception ex)
-                {
-                    _monitor?.Log($"[HoverPanel] WorldPositions read failed: {ex.Message}", LogLevel.Warn);
-                }*/
             }
 
             list.Sort(StringComparer.OrdinalIgnoreCase);
             _hoverElementNames = list;
             _hoverLeftScroll = 0;
         }
-        public  string FormatName(string input)
+        public string FormatName(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
                 return input;
@@ -2110,7 +2138,7 @@ namespace ForageTrackerMod
             return $"{AddSpaces(right)} ({AddSpaces(left)})";
         }
 
-        private  string AddSpaces(string text)
+        private string AddSpaces(string text)
         {
             return Regex.Replace(
                 text,
@@ -2121,17 +2149,59 @@ namespace ForageTrackerMod
         {
             _hoverLeftSel = index;
             _hoverSelectedLocations.Clear();
+            _hoverRightScroll = 0;
 
-            if (index < 0 || index >= _hoverElementNames.Count) return;
+            if (index < 0 || index >= _hoverElementNames.Count)
+                return;
 
             string hoverName = _hoverElementNames[index];
+
             HoverMappingStore.EnsureMap(_currentMapKey);
-            var existing = HoverMappingStore.GetLocations(_currentMapKey, hoverName);
+
+            var existing = HoverMappingStore.GetLocations(
+                _currentMapKey, hoverName);
+
+            _monitor.Log(
+                $"[HoverPanel] Map='{_currentMapKey}', " +
+                $"HoverName='{hoverName}', " +
+                $"FoundMapping={existing != null}, " +
+                $"Locations=[{string.Join(", ", existing ?? new List<string>())}]",
+                LogLevel.Debug);
+
             if (existing != null)
+            {
                 foreach (var loc in existing)
                     _hoverSelectedLocations.Add(loc);
-        }
+            }
+            SortHoverFilteredLocations();
 
+            _monitor.Log(
+                $"[HoverPanel] Selected count={_hoverSelectedLocations.Count}; " +
+                $"Right-list count={_hoverFilteredLocations.Count}; " +
+                $"Matches={_hoverFilteredLocations.Count(loc => _hoverSelectedLocations.Contains(loc))}",
+                LogLevel.Debug);
+        }
+        private void SortHoverFilteredLocations()
+        {
+            _hoverFilteredLocations.Sort((a, b) =>
+            {
+                bool aSelected = _hoverSelectedLocations.Contains(a);
+                bool bSelected = _hoverSelectedLocations.Contains(b);
+
+                // Selected locations first.
+                if (aSelected != bSelected)
+                    return aSelected ? -1 : 1;
+
+                // Alphabetical within each group.
+                return StringComparer.OrdinalIgnoreCase.Compare(a, b);
+            });
+
+            // Keep the scroll position valid after reordering.
+            _hoverRightScroll = Math.Clamp(
+                _hoverRightScroll,
+                0,
+                Math.Max(0, _hoverFilteredLocations.Count - _hoverRightVisibleRows));
+        }
         /// <summary>
         /// Writes the current _hoverSelectedLocations buffer back into the
         /// in-memory mapping store for the selected hoverable. Called after
@@ -2167,15 +2237,32 @@ namespace ForageTrackerMod
             _hoverFilteredLocations = string.IsNullOrWhiteSpace(_hoverFilterText)
                 ? _allLocations
                 : _allLocations.Where(n => n.Contains(_hoverFilterText, StringComparison.OrdinalIgnoreCase)).ToList();
-            _hoverRightScroll = Math.Clamp(_hoverRightScroll, 0, Math.Max(0, _hoverFilteredLocations.Count - 1));
+            // Scroll clamping against the correct per-list visible-row count
+            // happens in LayoutHoverPanel right after this call (and again
+            // wherever the filter text changes) — see _hoverRightVisibleRows.
+        }
+
+        /// <summary>
+        /// Called whenever the user types or backspaces in the filter field.
+        /// Rebuilds the filtered location list and re-clamps the right list's
+        /// scroll position — typing a narrower filter can shrink the content
+        /// below the current scroll offset, which would otherwise leave the
+        /// list showing nothing until the user manually scrolled back up.
+        /// </summary>
+        private void OnHoverFilterTextChanged()
+        {
+            RebuildHoverFilteredLocations();
+            _hoverRightScroll = Math.Clamp(_hoverRightScroll, 0, Math.Max(0, _hoverFilteredLocations.Count - _hoverRightVisibleRows));
         }
 
         /// <summary>
         /// Computes every rect for the panel from _ui — same single-source-of-
         /// truth pattern as LayoutSidebar(). Two equal-width columns split the
-        /// panel area, each with its own scrollable list. Recomputed whenever
-        /// the panel opens so it always matches the current screen size and
-        /// SDV UI scale.
+        /// panel area, each with its own scrollable list and scrollbar track.
+        /// Recomputed whenever the panel opens so it always matches the
+        /// current screen size and SDV UI scale — nothing here is a fixed
+        /// pixel constant; every size is derived from _ui or from measuring
+        /// the actual instruction text at the active scale.
         /// </summary>
         private void LayoutHoverPanel()
         {
@@ -2198,24 +2285,61 @@ namespace ForageTrackerMod
             _btnHoverResetRect = new Rectangle(_btnHoverCloseRect.X - pad - resetW, _hoverPanelRect.Y + pad, resetW, _ui.BtnH);
             _btnHoverClearRect = new Rectangle(_btnHoverResetRect.X - pad - clearW, _hoverPanelRect.Y + pad, clearW, _ui.BtnH);
 
+            // Map key label sits right under the title row.
+            int mapLabelH = (int)Math.Ceiling(Game1.smallFont.MeasureString("X").Y * _ui.SmallScale);
+            int mapLabelY = topY;
+
+            // ── Instructions now live ABOVE both lists, directly under the map
+            // label. Height is measured from the actual wrapped text at the
+            // panel's current width, so it grows/shrinks with font scale and
+            // never clips or leaves dead space.
+            int instructionsY = mapLabelY + mapLabelH + pad;
+            string wrappedHint = Game1.parseText(EditorHoverableUIStrings.HoverMappingHint, Game1.smallFont, _hoverPanelRect.Width - pad * 2);
+            int instructionsH = (int)Math.Ceiling(Game1.smallFont.MeasureString(wrappedHint).Y * _ui.SmallScale) + pad;
+            _hoverInstructionsRect = new Rectangle(_hoverPanelRect.X + pad, instructionsY, _hoverPanelRect.Width - pad * 2, instructionsH);
+
             // Two columns, equal width, filling the remaining vertical space
-            // down to the bottom margin (minus a small footer hint strip).
+            // down to the bottom margin. No footer strip anymore — the
+            // instructions moved above, so the lists can use that space too.
             int colW = (_hoverPanelRect.Width - pad * 3) / 2;
-            int listTop = topY;
-            int listBottom = _hoverPanelRect.Bottom - pad - _ui.LabelH;
+            int listTop = _hoverInstructionsRect.Bottom + pad;
+            int listBottom = _hoverPanelRect.Bottom - pad;
             int listH = Math.Max(_ui.RowH, listBottom - listTop);
 
-            _hoverLeftListRect = new Rectangle(_hoverPanelRect.X + pad, listTop, colW, listH);
+            // Scrollbar track width: wide enough to be an easy drag/click
+            // target at the current UI scale, derived from Pad rather than a
+            // fixed pixel count.
+            int trackW = Math.Max(8, _ui.Pad);
 
-            // Right column reserves a filter field above its list.
-            int rightX = _hoverLeftListRect.Right + pad;
+            int leftColX = _hoverPanelRect.X + pad;
+            _hoverLeftScrollTrackRect = new Rectangle(leftColX + colW - trackW, listTop, trackW, listH);
+            _hoverLeftListRect = new Rectangle(leftColX, listTop, colW - trackW - pad / 2, listH);
+
+            // Right column reserves a filter field above its list, and a
+            // track column on its right edge just like the left list.
+            int rightX = leftColX + colW + pad;
             _hoverFilterRect = new Rectangle(rightX, listTop, colW, _ui.FieldH);
-            _hoverRightListRect = new Rectangle(rightX, listTop + _ui.FieldH + pad, colW, listH - _ui.FieldH - pad);
+            int rightListTop = listTop + _ui.FieldH + pad;
+            int rightListH = listH - _ui.FieldH - pad;
+            _hoverRightScrollTrackRect = new Rectangle(rightX + colW - trackW, rightListTop, trackW, rightListH);
+            _hoverRightListRect = new Rectangle(rightX, rightListTop, colW - trackW - pad / 2, rightListH);
 
             _hoverRowH = Math.Max(_ui.RowH, _ui.LineH + 4);
-            _hoverVisibleRows = Math.Max(1, _hoverLeftListRect.Height / _hoverRowH);
+
+            // Each list's visible-row count comes from ITS OWN final height,
+            // not a shared value — this is what keeps the right list (which is
+            // shorter, having lost height to the filter field) from rendering
+            // rows past its own bottom edge.
+            _hoverLeftVisibleRows = Math.Max(1, _hoverLeftListRect.Height / _hoverRowH);
+            _hoverRightVisibleRows = Math.Max(1, _hoverRightListRect.Height / _hoverRowH);
 
             RebuildHoverFilteredLocations();
+
+            // Re-clamp both scroll offsets against the freshly computed
+            // per-list visible-row counts (panel may have been resized, or
+            // the filter may have changed the right list's content length).
+            _hoverLeftScroll = Math.Clamp(_hoverLeftScroll, 0, Math.Max(0, _hoverElementNames.Count - _hoverLeftVisibleRows));
+            _hoverRightScroll = Math.Clamp(_hoverRightScroll, 0, Math.Max(0, _hoverFilteredLocations.Count - _hoverRightVisibleRows));
         }
 
         private void DrawHoverMappingPanel(SpriteBatch b)
@@ -2240,33 +2364,65 @@ namespace ForageTrackerMod
             // Map key label, so it's unambiguous which map's mappings are showing.
             string mapLabel = $"{EditorUIStrings.Map}: {_currentMapKey}";
             b.DrawString(Game1.smallFont, mapLabel,
-                new Vector2(_hoverPanelRect.X + _ui.Pad, _btnHoverCloseRect.Bottom + 2),
+                new Vector2(_hoverPanelRect.X + _ui.Pad, _hoverInstructionsRect.Y - _ui.Pad),
                 Game1.textColor * 0.8f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
+
+            // ── Instructions — ABOVE both lists, per the panel's UX requirements.
+            // Wrapped to the panel width at layout time, so this always matches
+            // however many lines parseText produced for the current text/scale.
+            string wrappedHint = Game1.parseText(EditorHoverableUIStrings.HoverMappingHint, Game1.smallFont, _hoverInstructionsRect.Width);
+            b.DrawString(Game1.smallFont, wrappedHint,
+                new Vector2(_hoverInstructionsRect.X, _hoverInstructionsRect.Y),
+                Game1.textColor * 0.75f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
 
             DrawHoverLeftList(b);
             DrawHoverRightList(b);
-
-            // Footer hint
-            string hint = EditorHoverableUIStrings.HoverMappingHint;
-            b.DrawString(Game1.smallFont, hint,
-                new Vector2(_hoverPanelRect.X + _ui.Pad, _hoverPanelRect.Bottom - _ui.Pad - _ui.LabelH),
-                Game1.textColor * 0.6f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
         }
+        (string ChildName, string ParentText) GetHoverDisplayName(string hoverName)
+        {
+            int separator = hoverName.IndexOf('/');
 
+            if (separator < 0) return (hoverName, "");
+
+            string parentLocation = hoverName.Substring(0, separator);
+            string childLocation = hoverName.Substring(separator + 1);
+
+            int underscore = childLocation.IndexOf('_');
+            if (underscore >= 0) childLocation = childLocation.Substring(0, underscore);
+
+            // Separate words at lowercase-to-uppercase transitions.
+            childLocation = Regex.Replace(childLocation, @"(?<=[a-z])(?=[A-Z])", " ");
+
+            if (string.Equals(childLocation, "Default", StringComparison.OrdinalIgnoreCase)) return (parentLocation, "(Has its Own Area)");
+
+            return (childLocation, $"({parentLocation})");
+        }
+        int GetMeaningfulMappingCount(string hoverName)
+        {
+            var locations = HoverMappingStore.GetLocations(_currentMapKey, hoverName);
+
+            if (locations == null) return 0;
+
+            return locations.Count(loc => !string.IsNullOrWhiteSpace(loc) && !string.Equals(loc, "Default", StringComparison.OrdinalIgnoreCase));
+        }
         private void DrawHoverLeftList(SpriteBatch b)
         {
             var r = _hoverLeftListRect;
             b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.35f);
             DrawBorder(b, r, Color.Gray, 2);
 
-            int visible = Math.Min(_hoverVisibleRows, _hoverElementNames.Count - _hoverLeftScroll);
+            int visible = Math.Min(_hoverLeftVisibleRows, _hoverElementNames.Count - _hoverLeftScroll);
             for (int i = 0; i < visible; i++)
             {
                 int idx = i + _hoverLeftScroll;
                 var row = new Rectangle(r.X, r.Y + i * _hoverRowH, r.Width, _hoverRowH);
                 bool selected = idx == _hoverLeftSel;
-                bool hasMapping = HoverMappingStore.HasMapping(_currentMapKey, _hoverElementNames[idx]);
+                //bool hasMapping = HoverMappingStore.HasMapping(_currentMapKey, _hoverElementNames[idx]);
 
+                var locations = HoverMappingStore.GetLocations(_currentMapKey, _hoverElementNames[idx]);
+                bool hasMapping = locations != null && locations.Any(loc => !string.IsNullOrWhiteSpace(loc) && !string.Equals(loc, "Default", StringComparison.OrdinalIgnoreCase));
+
+                _monitor.Log($"[HoverPanel] Left row='{_hoverElementNames[idx]}', " + $"HasMapping={hasMapping}", LogLevel.Debug);
                 if (selected)
                     b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.25f);
                 else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))
@@ -2274,20 +2430,70 @@ namespace ForageTrackerMod
 
                 // Small left-edge tick for hoverables that already have a
                 // manual mapping, so users can see progress at a glance.
-                if (hasMapping)
-                    b.Draw(Game1.fadeToBlackRect, new Rectangle(row.X, row.Y, 4, row.Height), new Color(140, 220, 140));
+                if (hasMapping) b.Draw(Game1.fadeToBlackRect, new Rectangle(row.X, row.Y, 4, row.Height), new Color(140, 220, 140));
 
-                b.DrawString(Game1.smallFont, _hoverElementNames[idx],
-                    new Vector2(row.X + 8, row.Y + (_hoverRowH - _ui.LineH) / 2f),
-                    selected ? Color.Yellow : Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
-            }
+                var display = GetHoverDisplayName(_hoverElementNames[idx]);
 
-            if (_hoverElementNames.Count > _hoverVisibleRows)
-            {
-                b.DrawString(Game1.smallFont,
-                    $"{_hoverLeftScroll + 1}–{_hoverLeftScroll + visible} / {_hoverElementNames.Count}",
-                    new Vector2(r.X + 4, r.Bottom + 2),
-                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
+                Vector2 textPosition = new Vector2(row.X + 8, row.Y + (_hoverRowH - _ui.LineH) / 2f);
+
+                Color textColor = selected ? Color.Yellow : Color.White;
+
+                // Scale the bold offset with the UI scale.
+                float boldOffset = Math.Max(1f, _ui.NormalScale);
+
+                b.DrawString(
+                    Game1.smallFont,
+                    display.ChildName,
+                    textPosition,
+                    textColor,
+                    0f, Vector2.Zero,
+                    _ui.NormalScale,
+                    SpriteEffects.None, 1f
+                );
+                /*
+                // A second pass creates a stronger bold effect.
+                b.DrawString(
+                    Game1.smallFont,
+                    display.ChildName,
+                    textPosition + new Vector2(boldOffset, 0f),
+                    textColor,
+                    0f, Vector2.Zero,
+                    _ui.NormalScale,
+                    SpriteEffects.None, 1f
+                );
+                */
+                // Parent text starts after the actual rendered child width.
+                float childWidth =
+                    Game1.smallFont.MeasureString(display.ChildName).X * _ui.NormalScale
+                    + boldOffset;
+
+                Color descriptionColor = selected
+                ? new Color(220, 205, 145) // Muted yellow when selected
+                : new Color(175, 175, 175); // Subtle gray normally
+                b.DrawString(
+                    Game1.smallFont,
+                    " " + display.ParentText,
+                    textPosition + new Vector2(childWidth, 0f),
+                    descriptionColor,
+                    0f, Vector2.Zero,
+                    _ui.NormalScale,
+                    SpriteEffects.None, 1f
+                );
+                // Draws the amount of mappings it has.
+
+                int mappingCount = GetMeaningfulMappingCount(_hoverElementNames[idx]);
+
+                if (mappingCount > 0)
+                {
+                    string countText = mappingCount.ToString();
+
+                    float countWidth = Game1.smallFont.MeasureString(countText).X * _ui.NormalScale;
+
+                    float countX = row.Right - 10 - countWidth;
+                    float countY = row.Y + (_hoverRowH - _ui.LineH) / 2f;
+
+                    b.DrawString(Game1.smallFont, countText, new Vector2(countX, countY), descriptionColor, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
+                }
             }
 
             if (_hoverElementNames.Count == 0)
@@ -2296,8 +2502,21 @@ namespace ForageTrackerMod
                     new Vector2(r.X + 8, r.Y + 8),
                     Color.White * 0.5f, 0f, Vector2.Zero, _ui.SmallScale, SpriteEffects.None, 1f);
             }
-        }
 
+            DrawScrollbar(b, _hoverLeftScrollTrackRect, _hoverElementNames.Count, _hoverLeftVisibleRows, _hoverLeftScroll);
+        }
+        string GetLocationDisplayName(string locationName)
+        {
+            // Replace underscores with spaces.
+            string result = locationName.Replace("_", " ");
+
+            // Split lowercase-to-uppercase transitions.
+            result = Regex.Replace(result, @"(?<=[a-z])(?=[A-Z])", " ");
+
+            // Separate names from digit sequences, keeping digits together.
+            result = Regex.Replace(result, @"(?<=[a-zA-Z])(?=\d)", " ");
+            return result;
+        }
         private void DrawHoverRightList(SpriteBatch b)
         {
             DrawTextField(b, _hoverFilterRect,
@@ -2316,7 +2535,7 @@ namespace ForageTrackerMod
                 return;
             }
 
-            int visible = Math.Min(_hoverVisibleRows, _hoverFilteredLocations.Count - _hoverRightScroll);
+            int visible = Math.Min(_hoverRightVisibleRows, _hoverFilteredLocations.Count - _hoverRightScroll);
             for (int i = 0; i < visible; i++)
             {
                 int idx = i + _hoverRightScroll;
@@ -2325,7 +2544,9 @@ namespace ForageTrackerMod
                 bool isMapped = _hoverSelectedLocations.Contains(locName);
 
                 if (isMapped)
+                {
                     b.Draw(Game1.fadeToBlackRect, row, new Color(140, 220, 140) * 0.25f);
+                }
                 else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))
                     b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.1f);
 
@@ -2338,29 +2559,115 @@ namespace ForageTrackerMod
                     0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
                 float textX = row.X + 6 + Game1.smallFont.MeasureString("[x] ").X * _ui.NormalScale;
-                b.DrawString(Game1.smallFont, locName,
+
+                string displayName = GetLocationDisplayName(locName);
+
+                b.DrawString(Game1.smallFont, displayName,
                     new Vector2(textX, row.Y + (_hoverRowH - _ui.LineH) / 2f),
                     Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
             }
 
-            if (_hoverFilteredLocations.Count > _hoverVisibleRows)
-            {
-                b.DrawString(Game1.smallFont,
-                    $"{_hoverRightScroll + 1}–{_hoverRightScroll + visible} / {_hoverFilteredLocations.Count}",
-                    new Vector2(r.X + 4, r.Bottom + 2),
-                    Color.White * 0.5f, 0f, Vector2.Zero, _ui.TinyScale, SpriteEffects.None, 1f);
-            }
+            DrawScrollbar(b, _hoverRightScrollTrackRect, _hoverFilteredLocations.Count, _hoverRightVisibleRows, _hoverRightScroll);
         }
 
-        private void ReceiveLeftClickHoverPanel(int x, int y)
+        /// <summary>
+        /// Draws a track + draggable thumb for a scrollable list. Thumb size
+        /// and position are both derived entirely from content/viewport ratios
+        /// — never a fixed pixel size — so they stay accurate for any content
+        /// length and any track size the current UI scale produces:
+        ///
+        ///   thumbHeight = track.Height * (visibleRows / totalRows)
+        ///   thumbY      = track.Y + track.Height * (scrollOffset / totalRows)
+        ///
+        /// When all content already fits (totalRows <= visibleRows) the track
+        /// is drawn but no thumb is shown, since there's nothing to scroll —
+        /// this is also the visual tell that a list isn't currently capped.
+        /// </summary>
+        private static void DrawScrollbar(SpriteBatch b, Rectangle track, int totalRows, int visibleRows, int scrollOffset)
         {
-            if (_btnHoverCloseRect.Contains(x, y)) { CloseHoverMappingPanel(); return; }
+            b.Draw(Game1.fadeToBlackRect, track, Color.Black * 0.3f);
+            DrawBorder(b, track, Color.Gray * 0.6f, 1);
+
+            if (totalRows <= visibleRows || totalRows <= 0)
+                return; // nothing to scroll — bare track communicates that
+
+            float visibleFraction = Math.Clamp(visibleRows / (float)totalRows, 0f, 1f);
+            int thumbH = Math.Max(track.Height / 12, (int)(track.Height * visibleFraction)); // floor so the thumb never shrinks to invisible
+
+            int maxScroll = Math.Max(1, totalRows - visibleRows);
+            float scrollFraction = Math.Clamp(scrollOffset / (float)maxScroll, 0f, 1f);
+            int thumbY = track.Y + (int)((track.Height - thumbH) * scrollFraction);
+
+            var thumb = new Rectangle(track.X + 1, thumbY, Math.Max(1, track.Width - 2), thumbH);
+            b.Draw(Game1.fadeToBlackRect, thumb, Color.White * 0.7f);
+        }
+
+        /// <summary>
+        /// Converts a mouse Y position over a scrollbar track into a scroll
+        /// offset, scaled by the same content/viewport ratio DrawScrollbar
+        /// uses to position the thumb — so clicking or dragging anywhere in
+        /// the track maps to the matching point in the content, regardless of
+        /// track height or content length.
+        /// </summary>
+        private static int ScrollOffsetFromTrackY(Rectangle track, int totalRows, int visibleRows, int mouseY)
+        {
+            int maxScroll = Math.Max(0, totalRows - visibleRows);
+            if (maxScroll == 0 || track.Height <= 0) return 0;
+
+            float fraction = Math.Clamp((mouseY - track.Y) / (float)track.Height, 0f, 1f);
+            return (int)Math.Round(fraction * maxScroll);
+        }
+        void RefreshHoverSelection()
+        {
+            _hoverSelectedLocations.Clear();
+
+            if (_hoverLeftSel < 0 || _hoverLeftSel >= _hoverElementNames.Count)
+                return;
+
+            string hoverName = _hoverElementNames[_hoverLeftSel];
+
+            var locations = HoverMappingStore.GetLocations(
+                _currentMapKey, hoverName);
+
+            if (locations == null)
+            {
+                _monitor.Log(
+                    $"[HoverPanel] No locations for '{hoverName}'",
+                    LogLevel.Debug);
+                return;
+            }
+
+            foreach (string location in locations)
+                _hoverSelectedLocations.Add(location);
+
+            _monitor.Log(
+                $"[HoverPanel] Selected '{hoverName}': " +
+                $"[{string.Join(", ", _hoverSelectedLocations)}]",
+                LogLevel.Debug);
+
+            _hoverRightScroll = Math.Clamp(
+                _hoverRightScroll,
+                0,
+                Math.Max(0, _hoverFilteredLocations.Count - _hoverRightVisibleRows));
+        }
+        void ReceiveLeftClickHoverPanel(int x, int y)
+        {
+            if (_btnHoverCloseRect.Contains(x, y))
+            {
+                CloseHoverMappingPanel();
+                return;
+            }
 
             if (_btnHoverResetRect.Contains(x, y))
             {
                 HoverMappingStore.ResetToDefault(_currentMapKey);
-                SelectHoverLeftIndex(_hoverLeftSel); // refresh checkmarks from the restored defaults
-                Game1.playSound("trashcan");
+                HoverMappingStore.Save();
+
+                // Reload the selected parent's children from restored data.
+                RefreshHoverSelection();
+                SortHoverFilteredLocations();
+                // Game1.playSound("trashcan");
+                Game1.playSound("smallSelect");
                 return;
             }
 
@@ -2375,6 +2682,21 @@ namespace ForageTrackerMod
             if (_hoverFilterRect.Contains(x, y)) { _hoverFilterFocused = true; return; }
             _hoverFilterFocused = false;
 
+            // Scrollbar tracks — click jumps the thumb to that position and
+            // begins a drag, exactly like the existing region-handle drags.
+            if (_hoverLeftScrollTrackRect.Contains(x, y))
+            {
+                _hoverLeftScroll = ScrollOffsetFromTrackY(_hoverLeftScrollTrackRect, _hoverElementNames.Count, _hoverLeftVisibleRows, y);
+                _draggingHoverLeftScroll = true;
+                return;
+            }
+            if (_hoverRightScrollTrackRect.Contains(x, y))
+            {
+                _hoverRightScroll = ScrollOffsetFromTrackY(_hoverRightScrollTrackRect, _hoverFilteredLocations.Count, _hoverRightVisibleRows, y);
+                _draggingHoverRightScroll = true;
+                return;
+            }
+
             // Left list — select a hoverable
             if (_hoverLeftListRect.Contains(x, y))
             {
@@ -2382,7 +2704,12 @@ namespace ForageTrackerMod
                 int idx = row + _hoverLeftScroll;
                 if (idx >= 0 && idx < _hoverElementNames.Count)
                 {
-                    SelectHoverLeftIndex(idx);
+                    //SelectHoverLeftIndex(idx);
+                    _hoverLeftSel = idx;
+                    _hoverRightScroll = 0;
+
+                    RefreshHoverSelection();
+                    SortHoverFilteredLocations();
                     Game1.playSound("smallSelect");
                 }
                 return;
@@ -2400,6 +2727,7 @@ namespace ForageTrackerMod
                         _hoverSelectedLocations.Remove(locName);
 
                     CommitHoverSelection();
+                    SortHoverFilteredLocations();
                     Game1.playSound("smallSelect");
                 }
                 return;
@@ -2408,19 +2736,19 @@ namespace ForageTrackerMod
 
         private void ReceiveScrollHoverPanel(int mx, int my, int direction)
         {
-            if (_hoverLeftListRect.Contains(mx, my))
+            if (_hoverLeftListRect.Contains(mx, my) || _hoverLeftScrollTrackRect.Contains(mx, my))
             {
                 _hoverLeftScroll = Math.Clamp(
                     _hoverLeftScroll - Math.Sign(direction),
-                    0, Math.Max(0, _hoverElementNames.Count - _hoverVisibleRows));
+                    0, Math.Max(0, _hoverElementNames.Count - _hoverLeftVisibleRows));
                 return;
             }
 
-            if (_hoverRightListRect.Contains(mx, my))
+            if (_hoverRightListRect.Contains(mx, my) || _hoverRightScrollTrackRect.Contains(mx, my))
             {
                 _hoverRightScroll = Math.Clamp(
                     _hoverRightScroll - Math.Sign(direction),
-                    0, Math.Max(0, _hoverFilteredLocations.Count - _hoverVisibleRows));
+                    0, Math.Max(0, _hoverFilteredLocations.Count - _hoverRightVisibleRows));
                 return;
             }
         }
