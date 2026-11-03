@@ -2422,7 +2422,6 @@ namespace ForageTrackerMod
                 var locations = HoverMappingStore.GetLocations(_currentMapKey, _hoverElementNames[idx]);
                 bool hasMapping = locations != null && locations.Any(loc => !string.IsNullOrWhiteSpace(loc) && !string.Equals(loc, "Default", StringComparison.OrdinalIgnoreCase));
 
-                _monitor.Log($"[HoverPanel] Left row='{_hoverElementNames[idx]}', " + $"HasMapping={hasMapping}", LogLevel.Debug);
                 if (selected)
                     b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.25f);
                 else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))

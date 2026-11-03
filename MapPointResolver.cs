@@ -2,6 +2,8 @@ using ForageTrackerModSV.Compatibility;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using System;
+using System.Text.RegularExpressions;
 
 namespace ForageTrackerMod
 {
@@ -55,16 +57,13 @@ namespace ForageTrackerMod
     public static class MapPointResolver
     {
         // point.name → candidate GameLocation names (ordered, best first from WorldPositions)
-        private static readonly Dictionary<string, List<string>> _pointToLocations =
-            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, List<string>> _pointToLocations = new(StringComparer.OrdinalIgnoreCase);
 
         // GameLocation.Name → point.name that covers it (reverse lookup)
-        private static readonly Dictionary<string, string> _locationToPoint =
-            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, string> _locationToPoint = new(StringComparer.OrdinalIgnoreCase);
 
         // WorldPositions location names per area.Id (area.Id → locations)
-        private static readonly Dictionary<string, List<string>> _areaToLocations =
-            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, List<string>> _areaToLocations = new(StringComparer.OrdinalIgnoreCase);
 
         private static MapPage? _lastPage;
         private static IMonitor? _monitor;
@@ -136,7 +135,7 @@ namespace ForageTrackerMod
                             // Also include the base texture if present.
                             var baseTexData = area.Data?.Textures?.FirstOrDefault();
                             var baseTex = baseTexData?.Texture; // or whatever property holds the loaded texture
-                             if (baseTex != null)
+                            if (baseTex != null)
                             {
                                 var source = baseTexData.SourceRect; // if it exists
 
@@ -164,9 +163,17 @@ namespace ForageTrackerMod
                     int slash = point.name.IndexOf('/');
                     if (slash >= 0)
                     {
+                        string parent = point.name[..slash];
                         string sub = point.name[(slash + 1)..];
-                        if (!string.IsNullOrEmpty(sub) && !candidates.Contains(sub))
-                            candidates.Insert(0, sub); // sub-name is most specific, put first
+
+                        if (string.Equals(sub, "Default", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!candidates.Contains(parent, StringComparer.OrdinalIgnoreCase)) candidates.Insert(0, parent);
+                        }
+                        else if (!string.IsNullOrEmpty(sub) && !candidates.Contains(sub, StringComparer.OrdinalIgnoreCase))
+                        {
+                            candidates.Insert(0, sub);
+                        }
                     }
 
                     if (candidates.Count > 0)
@@ -183,8 +190,7 @@ namespace ForageTrackerMod
                 _monitor?.Log($"[Resolver] Build error: {ex.Message}", LogLevel.Warn);
             }
         }
-        private static readonly HashSet<string> _resolutionLocked =
-    new(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> _resolutionLocked = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>
         /// Resolves a map point name to every internal GameLocation it maps to.
         ///
@@ -214,11 +220,28 @@ namespace ForageTrackerMod
             var manual = HoverMappingStore.GetLocations(mapKey, pointName);
             if (manual != null)
             {
-                _monitor?.Log(
-                    $"[Resolver] '{pointName}' → manual mapping [{string.Join(", ", manual)}]",
-                    LogLevel.Debug);
+                _monitor?.Log($"[Resolver] '{pointName}' → manual mapping [{string.Join(", ", manual)}]", LogLevel.Debug);
                 return manual;
             }
+            // ── Default hoverables represent their parent area ────────────────
+            int slash = pointName.IndexOf('/');
+            if (slash > 0)
+            {
+                string parent = pointName[..slash];
+                string child = pointName[(slash + 1)..];
+
+                if (string.Equals(child, "Default", StringComparison.OrdinalIgnoreCase))
+                {
+                    _monitor?.Log($"[Resolver] '{pointName}' → parent area '{parent}'", LogLevel.Debug);
+
+                    return IsRealLocation(parent) ? new List<string> { parent } : new List<string>();
+                }
+            }
+            _monitor?.Log(
+    $"[Resolver][LOCATION TEST] " +
+    $"LeahCottage={IsRealLocation("LeahCottage")}, " +
+    $"LeahHouse={IsRealLocation("LeahHouse")}",
+    LogLevel.Debug);
 
             // ── Legacy algorithmic fallback (unmapped hoverables only) ────────
             _resolutionLocked.Clear();
@@ -231,8 +254,8 @@ namespace ForageTrackerMod
                 return new List<string>();
             }
 
-            string? best      = null;
-            int     bestScore = int.MinValue;
+            string? best = null;
+            int bestScore = int.MinValue;
 
             // Track which candidates are ancestors of others — used to penalise
             // overly broad results when more specific ones exist.
@@ -250,7 +273,7 @@ namespace ForageTrackerMod
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    best      = candidate;
+                    best = candidate;
                 }
             }
 
@@ -260,30 +283,55 @@ namespace ForageTrackerMod
             _resolutionLocked.Add(best);
             return new List<string> { best };
         }
-        private static int ClusterScore(string candidate, string areaId)
+        public static bool IsRealLocation(string? name)
         {
-            if (_areaToLocations.TryGetValue(areaId, out var locs))
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            /*
+            try
             {
-                if (locs.Contains(candidate, StringComparer.OrdinalIgnoreCase))
-                    return 100;
-
-                foreach (var loc in locs)
-                {
-                    if (LocationHierarchy.GetChildren(loc)
-                        .Any(c => c.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
-                        return 60;
-
-                    if (candidate.Contains(loc, StringComparison.OrdinalIgnoreCase) ||
-                        loc.Contains(candidate, StringComparison.OrdinalIgnoreCase))
-                        return 20;
-                }
+                return Game1.getLocationFromName(name) != null;
             }
+            catch
+            {
+                return false;
+            }
+            */
+            bool found = false;
 
-            return -50;
+
+            try
+            {
+                /*
+                foreach (var locName in LocationHierarchy.AllLocations)
+                {
+                    if (string.Equals(locName, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        return false; // Stop searching.
+                    }
+
+                    return true; // Continue searching.
+                }
+                */
+                StardewValley.Utility.ForEachLocation(location =>
+                {
+                    if (string.Equals(location.Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        return false; // Stop searching.
+                    }
+
+                    return true; // Continue searching.
+                }, includeInteriors: true);
+            }
+            catch (Exception ex)
+            {
+                _monitor?.Log($"[Resolver] Validation failed for '{name}': {ex.Message}", LogLevel.Warn);
+                return false;
+            }
+            return found;
         }
-        public static string? GetPointForLocation(string locationName) =>
-            _locationToPoint.TryGetValue(locationName, out var p) ? p : null;
-        private static HashSet<string> GetAllowedClusterLocations(MapPage page, string pointName)
+        static HashSet<string> GetAllowedClusterLocations(MapPage page, string pointName)
         {
             var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -359,9 +407,21 @@ namespace ForageTrackerMod
 
             void AddStrict(string? name)
             {
-                if (string.IsNullOrEmpty(name)) return;
+                if (string.IsNullOrWhiteSpace(name))
+                    return;
 
-                if (!InSameAreaScope(pointName, name)) return;
+                bool inScope = InSameAreaScope(pointName, name);
+
+                _monitor?.Log(
+                    $"[Resolver] AddStrict: Point='{pointName}', " +
+                    $"Candidate='{name}', " +
+                    $"NormalizedPoint='{NormalizeLocation(pointName.Contains('/') ? pointName[(pointName.IndexOf('/') + 1)..] : pointName)}', " +
+                    $"NormalizedCandidate='{NormalizeLocation(name)}', " +
+                    $"InScope={inScope}",
+                    LogLevel.Debug);
+
+                if (!inScope)
+                    return;
 
                 if (strictSeen.Add(name))
                     strict.Add(name);
@@ -369,12 +429,41 @@ namespace ForageTrackerMod
 
             void AddFallback(string? name)
             {
-                if (string.IsNullOrEmpty(name)) return;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    _monitor?.Log(
+                        $"[Resolver][Fallback] REJECT point='{pointName}': " +
+                        "candidate is null or empty.",
+                        LogLevel.Debug);
+                    return;
+                }
 
-                if (!InSameAreaScope(pointName, name)) return;
+                bool inScope = InSameAreaScope(pointName, name);
 
-                if (fallbackSeen.Add(name))
-                    fallback.Add(name);
+                if (!inScope)
+                {
+                    _monitor?.Log(
+                        $"[Resolver][Fallback] REJECT point='{pointName}', " +
+                        $"candidate='{name}': outside area scope.",
+                        LogLevel.Debug);
+                    return;
+                }
+
+                if (!fallbackSeen.Add(name))
+                {
+                    _monitor?.Log(
+                        $"[Resolver][Fallback] SKIP point='{pointName}', " +
+                        $"candidate='{name}': duplicate.",
+                        LogLevel.Trace);
+                    return; 
+                }
+
+                fallback.Add(name);
+
+                _monitor?.Log(
+                    $"[Resolver][Fallback] ACCEPT point='{pointName}', " +
+                    $"candidate='{name}': in area scope.",
+                    LogLevel.Debug);
             }
 
             // ─────────────────────────────────────────────
@@ -385,34 +474,120 @@ namespace ForageTrackerMod
             if (_pointToLocations.TryGetValue(pointName, out var direct))
             {
                 foreach (var n in direct)
+                {
+                    _monitor?.Log(
+                        $"[Resolver][SOURCE:SPATIAL] " +
+                        $"Point='{pointName}', Candidate='{n}', " +
+                        $"IsReal={IsRealLocation(n)}",
+                        LogLevel.Debug);
+
                     AddStrict(n);
+                }
             }
 
             // 2. Slash sub-name exact + SDV lookup ONLY
             int slash = pointName.IndexOf('/');
             if (slash >= 0)
             {
+                string parent = pointName[..slash];
                 string sub = pointName[(slash + 1)..];
 
-                if (!string.IsNullOrEmpty(sub))
+                if (string.Equals(sub, "Default", StringComparison.OrdinalIgnoreCase))
                 {
+                    // A Default hoverable represents the parent area itself.
+                    AddStrict(parent);
+
+                    try
+                    {
+                        AddStrict(Game1.getLocationFromName(parent)?.Name);
+                    }
+                    catch { }
+                }
+                
+                else if (!string.IsNullOrEmpty(sub))
+                {
+                    _monitor?.Log(
+                        $"[Resolver][SOURCE:SLASH] " +
+                        $"Point='{pointName}', Candidate='{sub}', " +
+                        $"IsReal={IsRealLocation(sub)}",
+                        LogLevel.Debug);
+
                     AddStrict(sub);
 
-                    try { AddStrict(Game1.getLocationFromName(sub)?.Name); } catch { }
+                    try
+                    {
+                        var location = Game1.getLocationFromName(sub);
+
+                        _monitor?.Log(
+                            $"[Resolver][SOURCE:GAMELOOKUP] " +
+                            $"Input='{sub}', Result='{location?.Name ?? "NULL"}'",
+                            LogLevel.Debug);
+
+                        AddStrict(location?.Name);
+                    }
+                    catch (Exception ex)
+                    {
+                        _monitor?.Log(
+                            $"[Resolver][GAMELOOKUP ERROR] {ex.Message}",
+                            LogLevel.Warn);
+                    }
 
                     int underscore = sub.IndexOf('_');
                     if (underscore > 0)
                     {
                         string stripped = sub[..underscore];
                         AddStrict(stripped);
-                        try { AddStrict(Game1.getLocationFromName(stripped)?.Name); } catch { }
+
+                        try
+                        {
+                            AddStrict(Game1.getLocationFromName(stripped)?.Name);
+                        }
+                        catch { }
                     }
                 }
 
-                if (_areaToLocations.TryGetValue(pointName[..slash], out var areaLocs))
+                if (_areaToLocations.TryGetValue(parent, out var areaLocs))
                 {
                     foreach (var n in areaLocs)
                         AddStrict(n);
+                }
+            }
+            // 2B. Normalized location matching.
+            //
+            // Discover actual game locations whose normalized names match
+            // the hover identifier, without requiring identical suffixes.
+
+            if (slash >= 0)
+            {
+                string sub = pointName[(slash + 1)..];
+
+                string normalizedSub = NormalizeLocation(sub);
+
+                if (!string.IsNullOrWhiteSpace(normalizedSub))
+                {
+                    foreach (var locationName in LocationHierarchy.AllLocations)
+                    {
+                        string normalizedLocation =
+                            NormalizeLocation(locationName);
+
+                        if (!string.Equals(
+                            normalizedSub,
+                            normalizedLocation,
+                            StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        _monitor?.Log(
+                            $"[Resolver][NormalizedMatch] " +
+                            $"Point='{pointName}', " +
+                            $"Sub='{sub}', " +
+                            $"Candidate='{locationName}', " +
+                            $"Normalized='{normalizedLocation}'",
+                            LogLevel.Debug);
+
+                        AddStrict(locationName);
+                    }
                 }
             }
 
@@ -460,100 +635,57 @@ namespace ForageTrackerMod
 
             return (strict, fallback);
         }
-        private static List<string> GatherCandidates(string pointName)
+        public static List<string> GetNormalizedMatches(string pointName)
         {
-            var seen       = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var candidates = new List<string>();
+            var results = new List<string>();
 
-            void Add(string? name)
-            {
-                if (!string.IsNullOrEmpty(name) && seen.Add(name!))
-                    candidates.Add(name!);
-            }
+            if (string.IsNullOrWhiteSpace(pointName))                return results;
 
-            // 1. Point-to-locations index (spatial match built in EnsureBuilt).
-            //    This is the most authoritative source — no string matching needed.
-            if (_pointToLocations.TryGetValue(pointName, out var direct))
-                foreach (var n in direct) Add(n);
-
-            // 2. Slash sub-name: "Beach/FishShop_ExtendedHours" → "FishShop"
-            //
-            // The sub-part after the slash is the most specific identifier for
-            // the point. However mods may append suffixes (e.g. _ExtendedHours,
-            // _v2, _Patched) that don't exist in GameLocation.Name.
-            //
-            // We try the sub-name in increasingly normalised forms:
-            //   a) Raw sub-name as-is          "FishShop_ExtendedHours"
-            //   b) Stripped at first underscore "FishShop"
-            //   c) SDV resolver on each form
             int slash = pointName.IndexOf('/');
-            if (slash >= 0)
+
+            if (slash < 0)                return results;
+
+            string sub = pointName[(slash + 1)..];
+            string normalized = NormalizeLocation(sub);
+
+            if (string.IsNullOrWhiteSpace(normalized))
+                return results;
+
+            foreach (var location in LocationHierarchy.AllLocations)
             {
-                string sub    = pointName[(slash + 1)..];
-                string prefix = pointName[..slash];
-
-                if (!string.IsNullOrEmpty(sub))
+                if (!string.Equals(
+                    NormalizeLocation(location),
+                    normalized,
+                    StringComparison.OrdinalIgnoreCase))
                 {
-                    // a) Raw
-                    Add(sub);
-                    try { Add(Game1.getLocationFromName(sub)?.Name); } catch { }
-
-                    // b) Strip at first underscore (removes mod suffixes)
-                    int underscore = sub.IndexOf('_');
-                    if (underscore > 0)
-                    {
-                        string stripped = sub[..underscore];
-                        Add(stripped);
-                        try { Add(Game1.getLocationFromName(stripped)?.Name); } catch { }
-                    }
+                    continue;
                 }
 
-                // Also include all locations from the prefix area.
-                if (_areaToLocations.TryGetValue(prefix, out var prefixLocs))
-                    foreach (var n in prefixLocs) Add(n);
+                if (!InSameAreaScope(pointName, location))
+                    continue;
+
+                if (!IsRealLocation(location))
+                    continue;
+
+                _monitor?.Log(
+    $"[Resolver][ALIAS TEST] " +
+    $"Point='{pointName}', " +
+    $"Candidate='{location}', " +
+    $"NormalizedPoint='{normalized}', " +
+    $"NormalizedLocation='{NormalizeLocation(location)}', " +
+    $"IsReal={IsRealLocation(location)}",
+    LogLevel.Debug);
+                results.Add(location);
             }
 
-            // 3. LocationHierarchy children of each candidate so far.
-            //    If "Beach" is a candidate, "ElliottHouse" (its child) is added.
-            //    This handles hover points that represent building entrances.
-            var snapshot = candidates.ToList();
-            foreach (var loc in snapshot)
-                foreach (var child in LocationHierarchy.GetChildren(loc))
-                    Add(child);
+            _monitor?.Log(
+                $"[Resolver][NormalizedMatches] '{pointName}' => " +
+                $"[{string.Join(", ", results)}]",
+                LogLevel.Debug);
 
-            // 4. SDV resolver on the full point name.
-            try { Add(Game1.getLocationFromName(pointName)?.Name); } catch { }
-
-            // 5. Substring search across all known locations (last resort).
-            //    Uses both the raw sub-name and the underscore-stripped form so
-            //    "FishShop_ExtendedHours" finds "FishShop" as a candidate.
-            string lower = pointName.ToLowerInvariant();
-            string subLower = slash >= 0 ? pointName[(slash + 1)..].ToLowerInvariant() : lower;
-            // Stripped: remove everything from first underscore onward.
-            int ul = subLower.IndexOf('_');
-            string subStrippedLower = ul > 0 ? subLower[..ul] : subLower;
-
-            foreach (var locName in LocationHierarchy.AllLocations)
-            {
-                string locLower = locName.ToLowerInvariant();
-                // Prefer matches against the stripped sub-name (most specific).
-                if (!string.IsNullOrEmpty(subStrippedLower)
-                    && (locLower.Contains(subStrippedLower) || subStrippedLower.Contains(locLower)))
-                    Add(locName);
-                else if (locLower.Contains(subLower) || subLower.Contains(locLower))
-                    Add(locName);
-                else if (lower.Contains(locLower) || locLower.Contains(lower))
-                    Add(locName);
-            }
-
-            return candidates;
-        }
-
-        // ── Scoring ───────────────────────────────────────────────────────────
-        private static string GetAreaPrefix(string pointName)
-        {
-            int slash = pointName.IndexOf('/');
-            return slash > 0 ? pointName[..slash] : pointName;
+            return results
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
         /// <summary>
         /// Returns true if the candidate is a reasonable resolution target for
@@ -567,78 +699,91 @@ namespace ForageTrackerMod
         /// </summary>
         private static bool InSameAreaScope(string pointName, string candidate)
         {
-            // If we have spatial cluster data for this point, check membership
-            // (candidate or its parent is in the cluster).
             if (_pointToLocations.TryGetValue(pointName, out var clusterLocs))
             {
-                if (clusterLocs.Contains(candidate, StringComparer.OrdinalIgnoreCase))
-                    return true;
-
-                // Child of a cluster member is also in scope
+                // Preserve existing exact-match behavior.
+                if (clusterLocs.Contains(candidate, StringComparer.OrdinalIgnoreCase)) return true;
+    
+                // Preserve existing hierarchy behavior.
                 string? parent = LocationHierarchy.GetParent(candidate);
-                if (parent != null && clusterLocs.Contains(parent, StringComparer.OrdinalIgnoreCase))
-                    return true;
 
-                // If cluster data exists, reject anything outside it
-                // (prevents broad cross-area contamination)
-                if (clusterLocs.Count > 0)
-                    return false;
+                if (parent != null && clusterLocs.Contains(parent, StringComparer.OrdinalIgnoreCase)) return true;
+
+                // NEW: Recognize structural name equivalents. Example: ElliottCabin == ElliottHouse
+                string normalizedCandidate = NormalizeLocation(candidate);
+
+                foreach (var clusterLocation in clusterLocs)
+                {
+                    if (string.Equals(NormalizeLocation(clusterLocation), normalizedCandidate, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+
+                // Keep the original strict area boundary.
+                if (clusterLocs.Count > 0) return false;
             }
 
-            // No cluster data yet — fall back to permissive (scorer will rank)
             return true;
         }
-        private static string NormalizeLocation(string name)
+        internal static string NormalizeLocation(string name)
         {
-            if (string.IsNullOrEmpty(name))
-                return string.Empty;
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
 
             name = name.Trim();
 
-            // split into words (handles CamelCase + underscores + spaces)
+            // Remove map-point variants such as FishShop_ExtendedHours.
+            name = Regex.Replace(
+                name,
+                @"_ExtendedHours$",
+                "",
+                RegexOptions.IgnoreCase);
+
+            // Treat underscores as word separators.
             name = name.Replace("_", " ");
 
-            // remove common building suffixes (NOT hardcoded per game logic, just structural noise)
-            string[] suffixes =
-            {
-        "house",
-        "cabin",
-        "tower",
-        "tent",
-        "home",
-        "shop",
-"extendedhours"
-            };
+            // Split CamelCase: ElliottCabin -> Elliott Cabin.
+            name = Regex.Replace(name, @"([a-z0-9])([A-Z])", "$1 $2");
 
-            var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                             .Select(p => p.Trim());
+            var parts = name.Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries);
 
-            parts = parts.Where(p =>
-                !suffixes.Contains(p, StringComparer.OrdinalIgnoreCase));
+            // Remove structural suffixes only from the END.
+            var suffixes = new HashSet<string>(
+                new[]
+                {
+            "house",
+            "cabin",
+            "cottage",
+            "tower",
+            "tent",
+            "home",
+            "shop"
+                },
+                StringComparer.OrdinalIgnoreCase);
 
-            return string.Join(" ", parts).Trim();
+            int end = parts.Length;
+
+            while (end > 0 && suffixes.Contains(parts[end - 1]))
+                end--;
+
+            return string.Join(
+                " ",
+                parts.Take(end)).Trim();
         }
-        private static void Lock(string candidate)
-        {
-            _resolutionLocked.Add(candidate);
-        }
-        private static int Score(
-            string candidate,
-            string pointName,
-            ForageTracker? tracker,
-            List<string> allCandidates,
-            HashSet<string> allCandidateSet)
+
+        private static int Score(string candidate, string pointName, ForageTracker? tracker, List<string> allCandidates, HashSet<string> allCandidateSet)
         {
             /*
             if (_resolutionLocked.Contains(candidate))
                 return int.MaxValue;*/
-                int score = 0;
-            var type  = LocationHierarchy.GetLocationType(candidate);
-           
+            int score = 0;
+            var type = LocationHierarchy.GetLocationType(candidate);
+
             string sub = pointName.Contains('/') ? pointName[(pointName.IndexOf('/') + 1)..] : pointName;
 
-            bool isExactNormalizedMatch =  NormalizeLocation(candidate) .Equals(NormalizeLocation(sub), StringComparison.OrdinalIgnoreCase);
+            int underscore = sub.IndexOf('_');
+            if (underscore >= 0) sub = sub[..underscore];
 
+            bool isExactNormalizedMatch = NormalizeLocation(candidate).Equals(NormalizeLocation(sub), StringComparison.OrdinalIgnoreCase);
             if (isExactNormalizedMatch)
                 score = Math.Max(score, 10000);
 
@@ -669,7 +814,6 @@ namespace ForageTrackerMod
             string subName = slash >= 0 ? pointName[(slash + 1)..] : pointName;
 
             // Stripped form: "FishShop_ExtendedHours" → "FishShop"
-            int underscore = subName.IndexOf('_');
             string subStripped = underscore > 0 ? subName[..underscore] : subName;
 
             if (slash >= 0)

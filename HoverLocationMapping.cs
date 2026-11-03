@@ -114,14 +114,11 @@ namespace ForageTrackerMod
         /// </summary>
         public static List<string>? GetLocations(string mapKey, string hoverName)
         {
-            if (string.IsNullOrEmpty(mapKey) || string.IsNullOrEmpty(hoverName))
-                return null;
+            if (string.IsNullOrEmpty(mapKey) || string.IsNullOrEmpty(hoverName)) return null;
 
-            if (!_cfg.Mappings.TryGetValue(mapKey, out var set))
-                return null;
+            if (!_cfg.Mappings.TryGetValue(mapKey, out var set)) return null;
 
-            var entry = set.Entries.FirstOrDefault(
-                e => string.Equals(e.HoverName, hoverName, StringComparison.OrdinalIgnoreCase));
+            var entry = set.Entries.FirstOrDefault(e => string.Equals(e.HoverName, hoverName, StringComparison.OrdinalIgnoreCase));
             return entry?.Locations;
         }
 
@@ -221,23 +218,92 @@ namespace ForageTrackerMod
             // Seed missing parent entries without overwriting manual mappings.
             var points = ForageTrackerModSV.Compatibility.MapPageCompat.GetPoints(mapPage);
 
+            _monitor?.Log($"[HoverMappingStore] SeedFromResolver: Map='{mapKey}', " + $"Points={points.Count()}", LogLevel.Debug);
+
             foreach (var point in points)
             {
                 if (string.IsNullOrWhiteSpace(point.name)) continue;
 
-                bool exists = set.Entries.Any(e => string.Equals(e.HoverName, point.name, StringComparison.OrdinalIgnoreCase));
+                var existingEntry = set.Entries.FirstOrDefault(e =>
+    string.Equals(
+        e.HoverName,
+        point.name,
+        StringComparison.OrdinalIgnoreCase));
 
-                if (exists) continue;
+                if (existingEntry != null)
+                {
+                    var aliases = MapPointResolver.GetNormalizedMatches(
+                        point.name);
+
+                    bool changed = false;
+
+                    foreach (var alias in aliases)
+                    {
+                        // Only add aliases equivalent to an existing mapping.
+                        bool equivalent = existingEntry.Locations.Any(existing =>
+                            string.Equals(MapPointResolver.NormalizeLocation(existing), MapPointResolver.NormalizeLocation(alias), StringComparison.OrdinalIgnoreCase));
+
+                        if (!equivalent)
+                            continue;
+
+                        if (existingEntry.Locations.Contains(
+                            alias,
+                            StringComparer.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        existingEntry.Locations.Add(alias);
+                        changed = true;
+
+                        _monitor?.Log(
+                            $"[HoverMappingStore][Repair] " +
+                            $"'{point.name}': added '{alias}' " +
+                            $"as an equivalent location.",
+                            LogLevel.Debug);
+                    }
+
+                    if (changed)
+                        mappingsChanged = true;
+
+                    continue;
+                }
 
                 var resolved = MapPointResolver.ResolveAll(mapKey, point.name, tracker);
 
-                if (resolved.Count == 0) continue;
+                /*
+                // Keep only locations that actually exist in the game.
+                resolved = resolved
+                    .Where(MapPointResolver.IsRealLocation)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+               
+                */
+                // Discover additional structurally equivalent locations.
+                resolved.AddRange(MapPointResolver.GetNormalizedMatches(point.name));
 
+                resolved = resolved
+                    .Where(MapPointResolver.IsRealLocation)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                _monitor?.Log(
+      $"[HoverMappingStore] RESULT '{point.name}' => " +
+      $"[{string.Join(", ", resolved)}]",
+      LogLevel.Debug);
+                if (resolved.Count == 0)
+                {
+                    _monitor?.Log(
+                        $"[HoverMappingStore] Skipping '{point.name}': " +
+                        "no valid locations found.",
+                        LogLevel.Trace);
+
+                    continue;
+                }
                 set.Entries.Add(new HoverMappingEntry
                 {
                     HoverName = point.name,
-                    Locations = resolved.Distinct(
-                    StringComparer.OrdinalIgnoreCase).ToList()
+                    Locations = resolved.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
                 });
 
                 mappingsChanged = true;
@@ -255,6 +321,5 @@ namespace ForageTrackerMod
             _monitor?.Log($"[HoverMappingStore] Seeded map '{mapKey}': " + $"{set.Entries.Count} mapping entries, " + $"{_cfg.Defaults[mapKey].Entries.Count} default entries", LogLevel.Debug);
 
         }
-
     }
 }
