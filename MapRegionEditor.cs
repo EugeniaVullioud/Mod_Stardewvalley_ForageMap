@@ -339,6 +339,40 @@ namespace ForageTrackerMod
 
             LayoutSidebar();
         }
+        private HashSet<string> GetAllAssignedLocations()
+        {
+            var assigned = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            foreach (string hoverName in _hoverElementNames)
+            {
+                var locations = HoverMappingStore.GetLocations(
+                    _currentMapKey,
+                    hoverName
+                );
+
+                if (locations == null)
+                    continue;
+
+                foreach (string location in locations)
+                {
+                    if (string.IsNullOrWhiteSpace(location))
+                        continue;
+
+                    // Ignore Default because it isn't an actual location assignment.
+                    if (string.Equals(
+                        location,
+                        "Default",
+                        StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    assigned.Add(location);
+                }
+            }
+
+            return assigned;
+        }
         string? FindTabBoundToCurrentMap()
         {
             string liveMapKey = MapKeyHelper.GetCurrentMapKey();
@@ -1504,26 +1538,7 @@ namespace ForageTrackerMod
             _draggingTextScale = false;
             _handle = Handle.None;
         }
-        private Rectangle FitButtonRect(
-    string text,
-    int x,
-    int y,
-    int minWidth = 80)
-        {
-            float scale = _ui.NormalScale;
 
-            int textW =
-                (int)(Game1.smallFont.MeasureString(text).X * scale);
-
-            int width =
-                Math.Max(minWidth, textW + _ui.Pad * 2);
-
-            return new Rectangle(
-                x,
-                y,
-                width,
-                _ui.BtnH);
-        }
         public override void leftClickHeld(int x, int y)
         {
             if (_draggingHoverLeftScroll)
@@ -2534,7 +2549,11 @@ namespace ForageTrackerMod
                 return;
             }
 
+            // All locations assigned anywhere in the left column.
+            var allAssignedLocations = GetAllAssignedLocations();
+
             int visible = Math.Min(_hoverRightVisibleRows, _hoverFilteredLocations.Count - _hoverRightScroll);
+
             for (int i = 0; i < visible; i++)
             {
                 int idx = i + _hoverRightScroll;
@@ -2542,12 +2561,36 @@ namespace ForageTrackerMod
                 var row = new Rectangle(r.X, r.Y + i * _hoverRowH, r.Width, _hoverRowH);
                 bool isMapped = _hoverSelectedLocations.Contains(locName);
 
+                // Has this location ever been assigned to ANY hoverable?
+                bool hasEverBeenAssigned = allAssignedLocations.Contains(locName);
+
                 if (isMapped)
                 {
-                    b.Draw(Game1.fadeToBlackRect, row, new Color(140, 220, 140) * 0.25f);
+                    // Green: assigned to the currently selected hoverable.
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        row,
+                        new Color(140, 220, 140) * 0.25f
+                    );
+                }
+                else if (!hasEverBeenAssigned)
+                {
+                    // Red: never assigned to any hoverable.
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        row,
+                        new Color(220, 65, 65) * 0.30f
+                    );
                 }
                 else if (row.Contains(Game1.getMouseX(), Game1.getMouseY()))
-                    b.Draw(Game1.fadeToBlackRect, row, Color.White * 0.1f);
+                {
+                    // Normal hover highlight.
+                    b.Draw(
+                        Game1.fadeToBlackRect,
+                        row,
+                        Color.White * 0.1f
+                    );
+                }
 
                 // Checkbox glyph — reuses the same checkmark convention as
                 // elsewhere in the editor (✓ for bound state).
