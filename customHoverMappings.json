@@ -12,12 +12,118 @@
                     ]
                 },
                 {
+                    "HoverName": "Town/Trailer",
+                    "Locations": [
+                        "Trailer_Big"
+                    ]
+                },
+                {
+                    "HoverName": "Town/PierreStore_ExtendedHours",
+                    "Locations": [
+                        "SeedShop",
+                        "Sunroom"
+                    ]
+                },
+                {
+                    "HoverName": "Town/PierreStore",
+                    "Locations": [
+                        "SeedShop",
+                        "Sunroom"
+                    ]
+                },
+                {
                     "HoverName": "Town/AlexHouse",
                     "Locations": [
                         "JoshHouse"
                     ]
+                },
+                {
+                    "HoverName": "Town/ManorHouse",
+                    "Locations": [
+                        "LewisBasement"
+                    ]
+                },
+                {
+                    "HoverName": "Forest/MarnieRanch",
+                    "Locations": [
+                        "AnimalShop"
+                    ]
+                },
+                {
+                    "HoverName": "Forest/SewerPipe",
+                    "Locations": [
+                        "Sewer"
+                    ]
+                },
+                {
+                    "HoverName": "Forest/WizardTower",
+                    "Locations": [
+                        "WizardHouseBasement"
+                    ]
+                },
+                {
+                    "HoverName": "SecretWoods/Default",
+                    "Locations": [
+                        "Woods"
+                    ]
+                },
+                {
+                    "HoverName": "Mountain/Carpenter",
+                    "Locations": [
+                        "ScienceHouse",
+                        "SebastianRoom"
+                    ]
+                },
+                {
+                    "HoverName": "Desert/Default",
+                    "Locations": [
+                        "SandyHouse",
+                        "DesertFestival",
+                        "SkullCave",
+                        "Club"
+                    ]
+                },
+                {
+                    "HoverName": "GingerIsland/Default",
+                    "Locations": [
+                        "IslandEast",
+                        "IslandFarmCave",
+                        "IslandFarmHouse",
+                        "IslandFieldOffice",
+                        "IslandHut",
+                        "IslandNorth",
+                        "IslandNorthCave1",
+                        "IslandShrine",
+                        "IslandSouth",
+                        "IslandSouthEast",
+                        "IslandSouthEastCave",
+                        "IslandWest",
+                        "IslandWestCave1"
+                    ]
                 }
             ]
-        }
+        },
+        "GingerIsland": {
+            "Entries": [
+                {
+                    "HoverName": "GingerIsland/Default",
+                    "Locations": [
+                        "IslandEast",
+                        "IslandFarmCave",
+                        "IslandFarmHouse",
+                        "IslandFieldOffice",
+                        "IslandHut",
+                        "IslandNorth",
+                        "IslandNorthCave1",
+                        "IslandShrine",
+                        "IslandSouth",
+                        "IslandSouthEast",
+                        "IslandSouthEastCave",
+                        "IslandWest",
+                        "IslandWestCave1"
+                    ]
+                }
+            ]
+        }       
     }
 }
