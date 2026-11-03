@@ -97,7 +97,77 @@ namespace ForageTrackerModSV
                 _config = new CustomHoverMappingConfig();
             }
         }
+        public static List<HoverMappingEntry> GetValidEntries(string mapKey)
+        {
+            var result = new List<HoverMappingEntry>();
+            _monitor?.Log(
+       $"[CustomMappings][IMPORT START] Map='{mapKey}'",
+       LogLevel.Info);
 
+            if (!_config.Mappings.TryGetValue(mapKey, out var set))
+            {
+                _monitor?.Log(
+                    $"[CustomMappings][IMPORT] No entries for '{mapKey}'. " +
+                    $"Available=[{string.Join(", ", _config.Mappings.Keys)}]",
+                    LogLevel.Warn);
+
+                return result;
+            }
+
+            foreach (var entry in set.Entries)
+            {
+                _monitor?.Log(
+                    $"[CustomMappings][CHECK ENTRY] " +
+                    $"Map='{mapKey}', Hover='{entry.HoverName}', " +
+                    $"Locations={entry.Locations.Count}",
+                    LogLevel.Info);
+
+                var validLocations = new List<string>();
+
+                foreach (var location in entry.Locations)
+                {
+                    bool isReal = MapPointResolver.IsRealLocation(location);
+
+                    _monitor?.Log(
+                        $"[CustomMappings][VALIDATION] " +
+                        $"Hover='{entry.HoverName}', " +
+                        $"Location='{location}', IsReal={isReal}",
+                        isReal ? LogLevel.Info : LogLevel.Warn);
+
+                    if (isReal &&
+                        !validLocations.Contains(
+                            location,
+                            StringComparer.OrdinalIgnoreCase))
+                    {
+                        validLocations.Add(location);
+                    }
+                }
+
+                if (validLocations.Count == 0)
+                {
+                    _monitor?.Log(
+                        $"[CustomMappings][ENTRY REJECTED] " +
+                        $"'{entry.HoverName}': no valid locations.",
+                        LogLevel.Warn);
+
+                    continue;
+                }
+
+                result.Add(new HoverMappingEntry
+                {
+                    HoverName = entry.HoverName,
+                    Locations = validLocations
+                });
+
+                _monitor?.Log(
+                    $"[CustomMappings][ENTRY ACCEPTED] " +
+                    $"'{entry.HoverName}' => " +
+                    $"[{string.Join(", ", validLocations)}]",
+                    LogLevel.Info);
+            }
+
+            return result;
+        }
         public static List<string>? GetLocations(string mapKey, string hoverName)
         {
             if (string.IsNullOrWhiteSpace(mapKey) || string.IsNullOrWhiteSpace(hoverName))

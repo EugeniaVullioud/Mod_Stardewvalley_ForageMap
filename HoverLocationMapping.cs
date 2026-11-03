@@ -1,3 +1,4 @@
+using ForageTrackerModSV;
 using StardewModdingAPI;
 
 namespace ForageTrackerMod
@@ -215,98 +216,138 @@ namespace ForageTrackerMod
             var set = EnsureMap(mapKey);
             bool mappingsChanged = false;
 
-            // Seed missing parent entries without overwriting manual mappings.
-            var points = ForageTrackerModSV.Compatibility.MapPageCompat.GetPoints(mapPage);
+            // Import explicitly configured custom mappings.
+            var customEntries =
+                CustomHoverMappingStore.GetValidEntries(mapKey);
 
-            _monitor?.Log($"[HoverMappingStore] SeedFromResolver: Map='{mapKey}', " + $"Points={points.Count()}", LogLevel.Debug);
-
-            foreach (var point in points)
+            foreach (var customEntry in customEntries)
             {
-                if (string.IsNullOrWhiteSpace(point.name)) continue;
+                var existing = set.Entries.FirstOrDefault(e =>
+                    string.Equals(
+                        e.HoverName,
+                        customEntry.HoverName,
+                        StringComparison.OrdinalIgnoreCase));
 
-                var existingEntry = set.Entries.FirstOrDefault(e =>
-    string.Equals(
-        e.HoverName,
-        point.name,
-        StringComparison.OrdinalIgnoreCase));
-
-                if (existingEntry != null)
+                if (existing == null)
                 {
-                    var aliases = MapPointResolver.GetNormalizedMatches(
-                        point.name);
-
-                    bool changed = false;
-
-                    foreach (var alias in aliases)
+                    set.Entries.Add(new HoverMappingEntry
                     {
-                        // Only add aliases equivalent to an existing mapping.
-                        bool equivalent = existingEntry.Locations.Any(existing =>
-                            string.Equals(MapPointResolver.NormalizeLocation(existing), MapPointResolver.NormalizeLocation(alias), StringComparison.OrdinalIgnoreCase));
+                        HoverName = customEntry.HoverName,
+                        Locations = new List<string>(customEntry.Locations)
+                    });
 
-                        if (!equivalent)
-                            continue;
+                    mappingsChanged = true;
 
-                        if (existingEntry.Locations.Contains(
-                            alias,
+                    _monitor?.Log(
+                        $"[HoverMappingStore][CUSTOM IMPORT] " +
+                        $"Added '{customEntry.HoverName}' => " +
+                        $"[{string.Join(", ", customEntry.Locations)}]",
+                        LogLevel.Info);
+                }
+                else
+                {
+                    foreach (var location in customEntry.Locations)
+                    {
+                        if (existing.Locations.Contains(
+                            location,
                             StringComparer.OrdinalIgnoreCase))
                         {
                             continue;
                         }
 
-                        existingEntry.Locations.Add(alias);
-                        changed = true;
-
-                        _monitor?.Log(
-                            $"[HoverMappingStore][Repair] " +
-                            $"'{point.name}': added '{alias}' " +
-                            $"as an equivalent location.",
-                            LogLevel.Debug);
-                    }
-
-                    if (changed)
+                        existing.Locations.Add(location);
                         mappingsChanged = true;
 
-                    continue;
+                        _monitor?.Log(
+                            $"[HoverMappingStore][CUSTOM IMPORT] " +
+                            $"Added location '{location}' to " +
+                            $"'{customEntry.HoverName}'",
+                            LogLevel.Info);
+                    }
                 }
+            }
+
+
+            // Seed missing parent entries without overwriting manual mappings.
+            var points = ForageTrackerModSV.Compatibility.MapPageCompat.GetPoints(mapPage);
+
+            _monitor?.Log(
+                $"[HoverMappingStore][SEED] MapKey='{mapKey}', " +
+                $"AvailablePoints=[{string.Join(", ", points.Select(p => p.name))}]",
+                LogLevel.Info);
+
+            foreach (var point in points)
+            {
+                if (string.IsNullOrWhiteSpace(point.name))
+                    continue;
 
                 var resolved = MapPointResolver.ResolveAll(mapKey, point.name, tracker);
 
-                /*
-                // Keep only locations that actually exist in the game.
-                resolved = resolved
-                    .Where(MapPointResolver.IsRealLocation)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-               
-                */
-                // Discover additional structurally equivalent locations.
+                // Preserve Default parent-area mappings.
+                int slash = point.name.IndexOf('/');
+
+                if (slash > 0)
+                {
+                    string parent = point.name[..slash];
+                    string child = point.name[(slash + 1)..];
+
+                    if (string.Equals(
+                        child,
+                        "Default",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (MapPointResolver.IsRealLocation(parent))
+                        {
+                            resolved.Add(parent);
+                        }
+                    }
+                }
+
+                // Add normalized automatic matches.
                 resolved.AddRange(MapPointResolver.GetNormalizedMatches(point.name));
 
+                // Retrieve manually configured locations.
+                var custom = CustomHoverMappingStore.GetLocations(mapKey, point.name);
+
+                if (custom != null) resolved.AddRange(custom);
+
+                // Validate and deduplicate.
                 resolved = resolved
                     .Where(MapPointResolver.IsRealLocation)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                _monitor?.Log(
-      $"[HoverMappingStore] RESULT '{point.name}' => " +
-      $"[{string.Join(", ", resolved)}]",
-      LogLevel.Debug);
-                if (resolved.Count == 0)
-                {
-                    _monitor?.Log(
-                        $"[HoverMappingStore] Skipping '{point.name}': " +
-                        "no valid locations found.",
-                        LogLevel.Trace);
+                if (resolved.Count == 0) continue;
 
-                    continue;
+                var existingEntry = set.Entries.FirstOrDefault(e =>
+                    string.Equals(
+                        e.HoverName,
+                        point.name,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (existingEntry == null)
+                {
+                    set.Entries.Add(new HoverMappingEntry
+                    {
+                        HoverName = point.name,
+                        Locations = resolved
+                    });
+
+                    mappingsChanged = true;
                 }
-                set.Entries.Add(new HoverMappingEntry
+                else
                 {
-                    HoverName = point.name,
-                    Locations = resolved.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                });
-
-                mappingsChanged = true;
+                    foreach (var location in resolved)
+                    {
+                        if (!existingEntry.Locations.Contains(
+                            location,
+                            StringComparer.OrdinalIgnoreCase))
+                        {
+                            existingEntry.Locations.Add(location);
+                            mappingsChanged = true;
+                        }
+                    }
+                }
             }
 
             // Ensure defaults contain the seeded parent-child relationships.

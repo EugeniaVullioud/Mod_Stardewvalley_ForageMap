@@ -3,6 +3,7 @@ using ForageTrackerModSV.Compatibility;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using System;
 using System.Text.RegularExpressions;
 
 namespace ForageTrackerMod
@@ -216,29 +217,87 @@ namespace ForageTrackerMod
         {
             if (string.IsNullOrEmpty(pointName)) return new List<string>();
 
-            // ── Manual mapping takes full priority ────────────────────────────
+            // ── Existing saved mappings + custom mappings ─────────────────────
             var manual = HoverMappingStore.GetLocations(mapKey, pointName);
-            if (manual != null)
-            {
-                _monitor?.Log($"[Resolver] '{pointName}' → manual mapping [{string.Join(", ", manual)}]", LogLevel.Debug);
-                return manual;
-            }
-
-            _monitor?.Log(
-    $"[Resolver][CUSTOM CHECK] " +
-    $"Map='{mapKey}', Point='{pointName}'",
-    LogLevel.Info);
-            // ── User-defined custom mappings have highest priority ────────────
             var custom = CustomHoverMappingStore.GetLocations(mapKey, pointName);
 
-            if (custom != null && custom.Count > 0)
+            // If either mapping exists, merge both with automatic discovery.
+            if (manual != null || custom != null)
             {
+                var combined = new List<string>();
+
+                void AddValid(string location)
+                {
+                    if (string.IsNullOrWhiteSpace(location))
+                        return;
+
+                    if (!IsRealLocation(location))
+                    {
+                        _monitor?.Log(
+                            $"[Resolver][MERGE INVALID] '{pointName}' => '{location}'",
+                            LogLevel.Warn);
+                        return;
+                    }
+
+                    if (!combined.Contains(location, StringComparer.OrdinalIgnoreCase))
+                        combined.Add(location);
+                }
+
+                // 1. Preserve existing saved mappings.
+                if (manual != null)
+                {
+                    foreach (var location in manual)
+                        AddValid(location);
+                }
+
+                // 2. Add custom mappings.
+                if (custom != null)
+                {
+                    foreach (var location in custom)
+                        AddValid(location);
+                }
+
+                // 3. Add automatically discovered best candidate.
+                _resolutionLocked.Clear();
+
+                var (strictC, fallbackC) = GatherCandidates2(pointName);
+                var discovered = strictC.Count > 0 ? strictC : fallbackC;
+
+                if (discovered.Count > 0)
+                {
+                    var candidateSet = new HashSet<string>(
+                        discovered,
+                        StringComparer.OrdinalIgnoreCase);
+
+                    string? bestC = null;
+                    int bestScoreC = int.MinValue;
+
+                    foreach (var candidate in discovered)
+                    {
+                        int score = Score(
+                            candidate,
+                            pointName,
+                            tracker,
+                            discovered,
+                            candidateSet);
+
+                        if (score > bestScoreC)
+                        {
+                            bestScoreC = score;
+                            bestC = candidate;
+                        }
+                    }
+
+                    if (bestC != null)
+                        AddValid(bestC);
+                }
+
                 _monitor?.Log(
-                    $"[Resolver] '{pointName}' → CUSTOM mapping " +
-                    $"[{string.Join(", ", custom)}]",
+                    $"[Resolver][MERGED RESULT] Map='{mapKey}', " +
+                    $"Point='{pointName}' => [{string.Join(", ", combined)}]",
                     LogLevel.Info);
 
-                return custom;
+                return combined;
             }
 
             // ── Default hoverables represent their parent area ────────────────
