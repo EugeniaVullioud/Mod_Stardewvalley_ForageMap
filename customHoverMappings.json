@@ -1,0 +1,23 @@
+{
+    "Mappings": {
+        "Town": {
+            "Entries": [
+                {
+                    "HoverName": "Railroad/Spa",
+                    "Locations": [
+                        "BathHouse_Entry",
+                        "BathHouse_MensLocker",
+                        "BathHouse_WomensLocker",
+                        "BathHouse_Pool"
+                    ]
+                },
+                {
+                    "HoverName": "Town/AlexHouse",
+                    "Locations": [
+                        "JoshHouse"
+                    ]
+                }
+            ]
+        }
+    }
+}

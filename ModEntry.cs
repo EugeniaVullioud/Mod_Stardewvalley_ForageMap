@@ -69,6 +69,8 @@ namespace ForageTrackerMod
             helper.Events.World.DebrisListChanged += OnDebrisListChanged;
 
             HoverMappingStore.Init(helper, Monitor);
+            CustomHoverMappingStore.Init(helper, Monitor);
+            MapPointResolver.Init(Monitor);
 
             SetEnabled(_config.Enabled);
             Debugger.DebugLog(Monitor, $"Forage Tracker loaded (initially {(_config.Enabled ? "enabled" : "disabled")}).", LogLevel.Info);

@@ -1,8 +1,8 @@
+using ForageTrackerModSV;
 using ForageTrackerModSV.Compatibility;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
-using System;
 using System.Text.RegularExpressions;
 
 namespace ForageTrackerMod
@@ -223,6 +223,24 @@ namespace ForageTrackerMod
                 _monitor?.Log($"[Resolver] '{pointName}' → manual mapping [{string.Join(", ", manual)}]", LogLevel.Debug);
                 return manual;
             }
+
+            _monitor?.Log(
+    $"[Resolver][CUSTOM CHECK] " +
+    $"Map='{mapKey}', Point='{pointName}'",
+    LogLevel.Info);
+            // ── User-defined custom mappings have highest priority ────────────
+            var custom = CustomHoverMappingStore.GetLocations(mapKey, pointName);
+
+            if (custom != null && custom.Count > 0)
+            {
+                _monitor?.Log(
+                    $"[Resolver] '{pointName}' → CUSTOM mapping " +
+                    $"[{string.Join(", ", custom)}]",
+                    LogLevel.Info);
+
+                return custom;
+            }
+
             // ── Default hoverables represent their parent area ────────────────
             int slash = pointName.IndexOf('/');
             if (slash > 0)
@@ -455,7 +473,7 @@ namespace ForageTrackerMod
                         $"[Resolver][Fallback] SKIP point='{pointName}', " +
                         $"candidate='{name}': duplicate.",
                         LogLevel.Trace);
-                    return; 
+                    return;
                 }
 
                 fallback.Add(name);
@@ -503,7 +521,7 @@ namespace ForageTrackerMod
                     }
                     catch { }
                 }
-                
+
                 else if (!string.IsNullOrEmpty(sub))
                 {
                     _monitor?.Log(
@@ -639,11 +657,11 @@ namespace ForageTrackerMod
         {
             var results = new List<string>();
 
-            if (string.IsNullOrWhiteSpace(pointName))                return results;
+            if (string.IsNullOrWhiteSpace(pointName)) return results;
 
             int slash = pointName.IndexOf('/');
 
-            if (slash < 0)                return results;
+            if (slash < 0) return results;
 
             string sub = pointName[(slash + 1)..];
             string normalized = NormalizeLocation(sub);
@@ -703,7 +721,7 @@ namespace ForageTrackerMod
             {
                 // Preserve existing exact-match behavior.
                 if (clusterLocs.Contains(candidate, StringComparer.OrdinalIgnoreCase)) return true;
-    
+
                 // Preserve existing hierarchy behavior.
                 string? parent = LocationHierarchy.GetParent(candidate);
 
