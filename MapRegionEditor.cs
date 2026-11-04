@@ -580,93 +580,138 @@ namespace ForageTrackerMod
                 _mapArea.Width + 8, _mapArea.Height + 8,
                 Color.White, drawShadow: false);
 
-            // ── Map image ─────────────────────────────────────────────────────
-            // _mapPage is sized to _mapArea exactly, so no erase strips needed.
-            _mapPage?.draw(b);
-
-            // ── Region overlays ───────────────────────────────────────────────
-            int mx = Game1.getMouseX(), my = Game1.getMouseY();
-            for (int i = 0; i < _currentRegions.Count; i++)
+            bool canShowMap = IsCurrentTabBoundToLiveMap;
+            if (canShowMap)
             {
-                var r = _currentRegions[i];
-                var sr = ToScreen(r);
-                bool isSel = i == _sel;
-                bool isHov = !isSel && sr.Contains(mx, my);
+                // ── Map image ─────────────────────────────────────────────────────
+                // _mapPage is sized to _mapArea exactly, so no erase strips needed.
+                _mapPage?.draw(b);
 
-                float alpha = r.Opacity / 255f;
-
-                b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? alpha : alpha * 0.85f));
-                DrawBorder(b, sr, isSel ? Color.White : (isHov ? Color.Yellow : r.Color), isSel ? 3 : (isHov ? 2 : 1));
-
-                if (sr.Width > 40)
+                // ── Region overlays ───────────────────────────────────────────────
+                int mx = Game1.getMouseX(), my = Game1.getMouseY();
+                for (int i = 0; i < _currentRegions.Count; i++)
                 {
-                    float scale = _cfg.RegionLabelScale;
+                    var r = _currentRegions[i];
+                    var sr = ToScreen(r);
+                    bool isSel = i == _sel;
+                    bool isHov = !isSel && sr.Contains(mx, my);
 
-                    Vector2 size = Game1.smallFont.MeasureString(r.Name) * scale;
+                    float alpha = r.Opacity / 255f;
 
-                    float maxWidth = sr.Width - 8;
-                    float maxHeight = sr.Height - 8;
+                    b.Draw(Game1.fadeToBlackRect, sr, r.Color * (isHov ? alpha : alpha * 0.85f));
+                    DrawBorder(b, sr, isSel ? Color.White : (isHov ? Color.Yellow : r.Color), isSel ? 3 : (isHov ? 2 : 1));
 
-                    if (size.X > maxWidth)
-                        scale *= maxWidth / size.X;
+                    if (sr.Width > 40)
+                    {
+                        float scale = _cfg.RegionLabelScale;
 
-                    size = Game1.smallFont.MeasureString(r.Name) * scale;
+                        Vector2 size = Game1.smallFont.MeasureString(r.Name) * scale;
 
-                    if (size.Y > maxHeight) scale *= maxHeight / size.Y;
+                        float maxWidth = sr.Width - 8;
+                        float maxHeight = sr.Height - 8;
 
-                    b.DrawString(Game1.smallFont, r.Name, new Vector2(sr.X + 4, sr.Y + 4), r.TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                        if (size.X > maxWidth)
+                            scale *= maxWidth / size.X;
+
+                        size = Game1.smallFont.MeasureString(r.Name) * scale;
+
+                        if (size.Y > maxHeight) scale *= maxHeight / size.Y;
+
+                        b.DrawString(Game1.smallFont, r.Name, new Vector2(sr.X + 4, sr.Y + 4), r.TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 1f);
+                    }
+
+                    if (isSel)
+                    {
+                        DrawHandles(b, sr);
+
+                        // Visualize grab zones
+                        // Opacity-based visibility
+                        byte alphaVis = (byte)Math.Min(255, _currentRegions[_sel].Opacity * 1.15f); // +15%
+                        Color dragZone = _currentRegions[_sel].Color;
+                        dragZone.A = alphaVis;
+
+                        // LEFT
+                        b.Draw(
+                            Game1.fadeToBlackRect,
+                            new Rectangle(
+                                sr.Left,
+                                sr.Top,
+                                _edgeGrab,
+                                sr.Height),
+                            dragZone);
+
+                        // RIGHT
+                        b.Draw(
+                            Game1.fadeToBlackRect,
+                            new Rectangle(
+                                sr.Right - _edgeGrab,
+                                sr.Top,
+                                _edgeGrab,
+                                sr.Height),
+                            dragZone);
+
+                        // TOP
+                        b.Draw(
+                            Game1.fadeToBlackRect,
+                            new Rectangle(
+                                sr.Left,
+                                sr.Top,
+                                sr.Width,
+                                _edgeGrab),
+                            dragZone);
+
+                        // BOTTOM
+                        b.Draw(
+                            Game1.fadeToBlackRect,
+                            new Rectangle(
+                                sr.Left,
+                                sr.Bottom - _edgeGrab,
+                                sr.Width,
+                                _edgeGrab),
+                            dragZone);
+                    }
+                }
+            }
+            else
+            {
+                // ── Unbound map placeholder ────────────────────────────
+
+                b.Draw(Game1.fadeToBlackRect, _mapArea, new Color(75, 75, 75));
+
+                string message =
+                    "The current playable map is not bound to this editable tab.\n\n" +
+                    "Bind this tab to the current map or go to the correct map binding.";
+
+                float scale = 0.9f;
+                float maxWidth = _mapArea.Width - 60;
+
+                Vector2 textSize = Game1.smallFont.MeasureString(message) * scale;
+
+                if (textSize.X > maxWidth)
+                {
+                    scale *= maxWidth / textSize.X;
+                    textSize = Game1.smallFont.MeasureString(message) * scale;
                 }
 
-                if (isSel)
-                {
-                    DrawHandles(b, sr);
+                Vector2 textPosition = new Vector2(
+                    _mapArea.Center.X - textSize.X / 2,
+                    _mapArea.Center.Y - textSize.Y / 2
+                );
 
-                    // Visualize grab zones
-                    // Opacity-based visibility
-                    byte alphaVis = (byte)Math.Min(255, _currentRegions[_sel].Opacity * 1.15f); // +15%
-                    Color dragZone = _currentRegions[_sel].Color;
-                    dragZone.A = alphaVis;
+                // Dark translucent backing
+                Rectangle messageBackground = new Rectangle(
+                    _mapArea.X + 20,
+                    _mapArea.Center.Y - (int)textSize.Y / 2 - 16,
+                    _mapArea.Width - 40,
+                    (int)textSize.Y + 32
+                );
 
-                    // LEFT
-                    b.Draw(
-                        Game1.fadeToBlackRect,
-                        new Rectangle(
-                            sr.Left,
-                            sr.Top,
-                            _edgeGrab,
-                            sr.Height),
-                        dragZone);
+                b.Draw(Game1.fadeToBlackRect, messageBackground, Color.Black * 0.4f);
 
-                    // RIGHT
-                    b.Draw(
-                        Game1.fadeToBlackRect,
-                        new Rectangle(
-                            sr.Right - _edgeGrab,
-                            sr.Top,
-                            _edgeGrab,
-                            sr.Height),
-                        dragZone);
-
-                    // TOP
-                    b.Draw(
-                        Game1.fadeToBlackRect,
-                        new Rectangle(
-                            sr.Left,
-                            sr.Top,
-                            sr.Width,
-                            _edgeGrab),
-                        dragZone);
-
-                    // BOTTOM
-                    b.Draw(
-                        Game1.fadeToBlackRect,
-                        new Rectangle(
-                            sr.Left,
-                            sr.Bottom - _edgeGrab,
-                            sr.Width,
-                            _edgeGrab),
-                        dragZone);
-                }
+                b.DrawString(Game1.smallFont, message,
+                    textPosition, Color.White * 0.9f,
+                    0f, Vector2.Zero, scale,
+                    SpriteEffects.None, 1f);
             }
 #if DEBUG
             // ── Debug overlay — draws fraction grid and mouse position ────────
@@ -908,7 +953,9 @@ namespace ForageTrackerMod
                 DrawButton(b, ActiveLayout.HoverMapButton, EditorHoverableUIStrings.EditHoverMapping, new Color(120, 170, 230), _ui);
             }
 
-            DrawButton(b, ActiveLayout.AddRegionButton, EditorUIStrings.AddRegion, Color.White, _ui);
+            bool canEditMap = IsCurrentTabBoundToLiveMap;
+
+            DrawButton(b, ActiveLayout.AddRegionButton, EditorUIStrings.AddRegion, canEditMap ? Color.White : Color.Gray * 0.5f, _ui);
             DrawButton(b, ActiveLayout.DeleteRegionButton, EditorUIStrings.Delete, _sel >= 0 ? Color.White : Color.Gray * 0.5f, _ui);
             DrawButton(b, ActiveLayout.SaveButton, EditorUIStrings.Save, new Color(140, 220, 140), _ui);
             DrawButton(b, ActiveLayout.CancelButton, EditorUIStrings.Cancel, new Color(220, 120, 120), _ui);
@@ -1387,8 +1434,19 @@ namespace ForageTrackerMod
             if (_btnNewMapRect.Contains(x, y)) { _newMapDialogOpen = true; return; }
 
             // ── Sidebar buttons ───────────────────────────────────────────────
-            if (ActiveLayout.AddRegionButton.Contains(x, y)) { AddRegion(); return; }
-            if (ActiveLayout.DeleteRegionButton.Contains(x, y)) { DeleteSelected(); return; }
+            // Add Region
+            if (ActiveLayout.AddRegionButton.Contains(x, y))
+            {
+                if (IsCurrentTabBoundToLiveMap) AddRegion();
+                return;
+            }
+            // if (ActiveLayout.DeleteRegionButton.Contains(x, y)) { DeleteSelected(); return; }
+            // Delete Region
+            if (ActiveLayout.DeleteRegionButton.Contains(x, y))
+            {
+                if (IsCurrentTabBoundToLiveMap && _sel >= 0) DeleteSelected();
+                return;
+            }
             if (ActiveLayout.ColorButton.Contains(x, y)) { CycleColor(); return; }
             if (ActiveLayout.TextColorButton.Contains(x, y))
             {
@@ -1505,7 +1563,9 @@ namespace ForageTrackerMod
             _nameFocused = false;
 
             // ── Map area ──────────────────────────────────────────────────────
-            if (_mapPanel.Contains(x, y))
+            if (IsCurrentTabBoundToLiveMap && _mapPanel.Contains(x, y)) // Avoid editing while not bound
+
+            //if (_mapPanel.Contains(x, y))
             {
                 _draggingOpacity = false;
                 int hit = HitTest(x, y);
