@@ -12,9 +12,63 @@
                     ]
                 },
                 {
+                    "HoverName": "Farm/Default",
+                    "Locations": [
+                        "Barn",
+                        "Coop",
+                        "Deluxe Barn",
+                        "Deluxe Coop",
+                        "Shed",
+                        "Big Shed",
+                        "FarmHouse",
+                        "FarmCave",
+                        "Greenhouse",
+                        "Cellar",
+                        "Cellar2",
+                        "Cellar3",
+                        "Cellar4",
+                        "Cellar5",
+                        "Cellar6",
+                        "Cellar7",
+                        "Cellar8"
+                    ]
+                },
+                {
+                    "HoverName": "Beach/FishShop_ExtendedHours",
+                    "Locations": [
+                        "BoatTunnel",
+                        "Submarine"
+                    ]
+                },
+                {
+                    "HoverName": "Beach/FishShop",
+                    "Locations": [
+                        "BoatTunnel",
+                        "Submarine"
+                    ]
+                },
+                {
                     "HoverName": "Town/Trailer",
                     "Locations": [
                         "Trailer_Big"
+                    ]
+                },
+                {
+                    "HoverName": "Town/Sewer",
+                    "Locations": [
+                        "BugLand"
+                    ]
+                },
+                {
+                    "HoverName": "Town/MovieTheater_CommunityCenterRoute",
+                    "Locations": [
+                        "MovieTheater"
+                    ]
+                },
+                {
+                    "HoverName": "Town/Museum",
+                    "Locations": [
+                        "ArchaeologyHouse"
                     ]
                 },
                 {
@@ -29,6 +83,12 @@
                     "Locations": [
                         "SeedShop",
                         "Sunroom"
+                    ]
+                },
+                {
+                    "HoverName": "Town/Hospital",
+                    "Locations": [
+                        "HarveyRoom"
                     ]
                 },
                 {
@@ -75,6 +135,12 @@
                     ]
                 },
                 {
+                    "HoverName": "Mountain/Mines",
+                    "Locations": [
+                        "Mine"
+                    ]
+                },
+                {
                     "HoverName": "Desert/Default",
                     "Locations": [
                         "SandyHouse",
@@ -98,7 +164,9 @@
                         "IslandSouthEast",
                         "IslandSouthEastCave",
                         "IslandWest",
-                        "IslandWestCave1"
+                        "IslandWestCave1",
+                        "Caldera",
+                        "QiNutRoom"
                     ]
                 }
             ]
@@ -120,7 +188,9 @@
                         "IslandSouthEast",
                         "IslandSouthEastCave",
                         "IslandWest",
-                        "IslandWestCave1"
+                        "IslandWestCave1",
+                        "Caldera",
+                        "QiNutRoom"
                     ]
                 }
             ]
