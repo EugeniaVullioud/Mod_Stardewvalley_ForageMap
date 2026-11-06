@@ -123,6 +123,8 @@ namespace ForageTrackerMod
 
             return false;
         }
+        private static bool _locationIndexBuilt;
+
         /// <summary>
         /// Build the indexes from mapPage data. Cached per MapPage instance.
         /// </summary>
@@ -132,6 +134,9 @@ namespace ForageTrackerMod
 
             _lastPage = page;
             _lastMapKey = mapKey;
+
+            if (!_locationIndexBuilt) BuildLocationIndex();
+            else RefreshLocationIndex();
 
             _pointToLocations.Clear();
             _locationToPoint.Clear();
@@ -524,8 +529,52 @@ namespace ForageTrackerMod
 
             return allowed;
         }
+
+        private static readonly LocationNameIndex _locationIndex = new();
+
+        public static void RegisterLocation(string locationName)
+        {
+            _locationIndex.Add(locationName);
+        }
+        public static void RefreshLocationIndex()
+        {
+            foreach (var location in Game1.locations)
+            {
+                if (location == null)
+                    continue;
+
+                _locationIndex.Add(location.Name);
+            }
+
+            foreach (var location in LocationHierarchy.AllLocations)
+            {
+                _locationIndex.Add(location);
+            }
+
+            _monitor?.Log(
+                $"[Resolver][INDEX REFRESH] Count={_locationIndex.Count}, " +
+                $"WizardHouse={_locationIndex.ContainsOriginal("WizardHouse")}",
+                LogLevel.Debug);
+        }
+        static void BuildLocationIndex()
+        {
+            _locationIndex.Clear();
+
+            foreach (var location in LocationHierarchy.AllLocations)
+            {
+                RegisterLocation(location);
+            }
+
+            RefreshLocationIndex();
+
+            _locationIndexBuilt = true;
+
+            _monitor?.Log(
+                $"[Resolver] Location index built: {_locationIndex.Count} locations",
+                LogLevel.Debug);
+        }
         // ── Candidate gathering ───────────────────────────────────────────────
-        private static (List<string> strict, List<string> fallback) GatherCandidates2(string pointName)
+        static (List<string> strict, List<string> fallback) GatherCandidates2(string pointName)
         {
             var strictSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var fallbackSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -534,117 +583,36 @@ namespace ForageTrackerMod
             var fallback = new List<string>();
 
             var allowedCluster = GetAllowedClusterLocations(page: _lastPage!, pointName);
-            _monitor?.Log(
-    $"[Resolver][MAP LOCATION INVENTORY] " +
-    $"Point='{pointName}'",
-    LogLevel.Info);
 
-            foreach (var location in _areaToLocations.Values
-                .SelectMany(x => x)
-                .Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                _monitor?.Log(
-                    $"[Resolver][MAP LOCATION] '{location}' " +
-                    $"Normalized='{NormalizeLocation(location)}' " +
-                    $"IsReal={IsRealLocation(location)}",
-                    LogLevel.Info);
-            }
             void AddStrict(string? name)
             {
                 if (string.IsNullOrWhiteSpace(name)) return;
                 if (!IsRealLocation(name)) return;
-
-                if (!IsCandidateForMapPoint(pointName, name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][STRICT REJECT] " +
-                        $"Point='{pointName}', Candidate='{name}': " +
-                        "not associated with current map point.",
-                        LogLevel.Debug);
-
-                    return;
-                }
+                if (!IsCandidateForMapPoint(pointName, name)) return;
 
                 bool inScope = InSameAreaScope(pointName, name);
 
-                _monitor?.Log(
-                    $"[Resolver] AddStrict: Point='{pointName}', " +
-                    $"Candidate='{name}', " +
-                    $"NormalizedPoint='{NormalizeLocation(pointName.Contains('/') ? pointName[(pointName.IndexOf('/') + 1)..] : pointName)}', " +
-                    $"NormalizedCandidate='{NormalizeLocation(name)}', " +
-                    $"InScope={inScope}",
-                    LogLevel.Debug);
-
                 if (!inScope) return;
-                if (!HasStrongNameMatch(pointName, name) && !IsDirectLocationRelationship(pointName, name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][WEAK MATCH REJECTED] " +
-                        $"Point='{pointName}', Candidate='{name}'",
-                        LogLevel.Debug);
+                if (!HasStrongNameMatch(pointName, name) && !IsDirectLocationRelationship(pointName, name)) return;
 
-                    return;
-                }
                 if (strictSeen.Add(name)) strict.Add(name);
             }
 
             void AddFallback(string? name)
             {
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][Fallback] REJECT point='{pointName}': " +
-                        "candidate is null or empty.",
-                        LogLevel.Debug);
-                    return;
-                }
-                if (!IsRealLocation(name)) return;
+                if (string.IsNullOrWhiteSpace(name) || !IsRealLocation(name)) return;
 
-                if (!IsCandidateForMapPoint(pointName, name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][FALLBACK REJECT] " +
-                        $"Point='{pointName}', Candidate='{name}': " +
-                        "not associated with current map point.",
-                        LogLevel.Debug);
+                if (!IsCandidateForMapPoint(pointName, name)) return;
 
-
-                    return;
-                }
                 bool inScope = InSameAreaScope(pointName, name);
 
-                if (!inScope)
-                {
-                    _monitor?.Log(
-                        $"[Resolver][Fallback] REJECT point='{pointName}', " +
-                        $"candidate='{name}': outside area scope.",
-                        LogLevel.Debug);
-                    return;
-                }
+                if (!inScope) return;
 
-                if (!fallbackSeen.Add(name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][Fallback] SKIP point='{pointName}', " +
-                        $"candidate='{name}': duplicate.",
-                        LogLevel.Trace);
-                    return;
-                }
-                if (!HasStrongNameMatch(pointName, name) && !IsDirectLocationRelationship(pointName, name))
-                {
-                    _monitor?.Log(
-                        $"[Resolver][WEAK MATCH REJECTED] " +
-                        $"Point='{pointName}', Candidate='{name}'",
-                        LogLevel.Debug);
+                if (!fallbackSeen.Add(name)) return;
 
-                    return;
-                }
+                if (!HasStrongNameMatch(pointName, name) && !IsDirectLocationRelationship(pointName, name)) return;
+
                 fallback.Add(name);
-
-                _monitor?.Log(
-                    $"[Resolver][Fallback] ACCEPT point='{pointName}', " +
-                    $"candidate='{name}': in area scope.",
-                    LogLevel.Debug);
             }
 
             // ─────────────────────────────────────────────
@@ -656,12 +624,6 @@ namespace ForageTrackerMod
             {
                 foreach (var n in direct)
                 {
-                    _monitor?.Log(
-                        $"[Resolver][SOURCE:SPATIAL] " +
-                        $"Point='{pointName}', Candidate='{n}', " +
-                        $"IsReal={IsRealLocation(n)}",
-                        LogLevel.Debug);
-
                     AddStrict(n);
                 }
             }
@@ -687,22 +649,12 @@ namespace ForageTrackerMod
 
                 else if (!string.IsNullOrEmpty(sub))
                 {
-                    _monitor?.Log(
-                        $"[Resolver][SOURCE:SLASH] " +
-                        $"Point='{pointName}', Candidate='{sub}', " +
-                        $"IsReal={IsRealLocation(sub)}",
-                        LogLevel.Debug);
 
                     AddStrict(sub);
 
                     try
                     {
                         var location = Game1.getLocationFromName(sub);
-
-                        _monitor?.Log(
-                            $"[Resolver][SOURCE:GAMELOOKUP] " +
-                            $"Input='{sub}', Result='{location?.Name ?? "NULL"}'",
-                            LogLevel.Debug);
 
                         AddStrict(location?.Name);
                     }
@@ -729,23 +681,18 @@ namespace ForageTrackerMod
 
                 if (_areaToLocations.TryGetValue(parent, out var areaLocs))
                 {
-                    foreach (var n in areaLocs)
-                        AddStrict(n);
+                    foreach (var n in areaLocs) AddStrict(n);
                 }
             }
             // 2B. Normalized location matching.
-            // Discover actual game locations whose normalized names match
-            // the hover identifier, without requiring identical suffixes.
+            // Discover actual game locations whose normalized names match the hover identifier, without requiring identical suffixes.
 
             //if (slash >= 0 && _pointToLocations.TryGetValue(pointName, out var mapCandidates))
             if (slash >= 0)
             {
-                foreach (var location in FindLoadedNormalizedMatches(
-        pointName,
-        _lastPage!))
+                foreach (var location in FindLoadedNormalizedMatches(pointName, _lastPage!))
                 {
-                    if (!IsRealLocation(location))
-                        continue;
+                    if (!IsRealLocation(location)) continue;
 
                     if (strictSeen.Add(location))
                     {
@@ -758,7 +705,7 @@ namespace ForageTrackerMod
                             LogLevel.Info);
                     }
                 }
-            
+
             }
 
             // 3. Direct SDV lookup on full name
@@ -927,71 +874,40 @@ namespace ForageTrackerMod
                 results.Add(location);
             }
 
-            return results;       
+            return results;
 
         }
 
-        private static List<string> FindLoadedNormalizedMatches(
-            string pointName,
-            MapPage page)
+        private static List<string> FindLoadedNormalizedMatches(string pointName, MapPage page)
         {
             var results = new List<string>();
 
             int slash = pointName.IndexOf('/');
-            if (slash < 0)
-                return results;
+            if (slash < 0) return results;
 
             string sub = pointName[(slash + 1)..];
 
             // Remove map-point variants such as ExtendedHours.
             int underscore = sub.IndexOf('_');
-            if (underscore > 0)
-                sub = sub[..underscore];
+            if (underscore > 0) sub = sub[..underscore];
 
             string normalizedPoint = NormalizeLocation(sub);
 
-            if (string.IsNullOrWhiteSpace(normalizedPoint))
-                return results;
+            if (string.IsNullOrWhiteSpace(normalizedPoint)) return results;
 
-            var locations = new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase);
+            RefreshLocationIndex();
 
-            // Include hierarchy locations.
-            foreach (var location in LocationHierarchy.AllLocations)
-                locations.Add(location);
-
-            // Include actual loaded game locations.
-            foreach (var location in Game1.locations)
+            foreach (var entry in _locationIndex.FindNormalized(normalizedPoint))
             {
-                if (location == null)
-                    continue;
+                if (!IsRealLocation(entry.OriginalName)) continue;
 
-                locations.Add(location.Name);
-            }
-
-            foreach (var locationName in locations)
-            {
-                if (!IsRealLocation(locationName))
-                    continue;
-
-                string normalizedLocation =
-                    NormalizeLocation(locationName);
-
-                if (!string.Equals(
-                    normalizedPoint,
-                    normalizedLocation,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                results.Add(locationName);
+                results.Add(entry.OriginalName);
 
                 _monitor?.Log(
-                    $"[Resolver][LOADED NORMALIZED MATCH] " +
+                    $"[Resolver][INDEX MATCH] " +
                     $"Point='{pointName}', " +
-                    $"Candidate='{locationName}', " +
-                    $"Normalized='{normalizedLocation}'",
+                    $"Original='{entry.OriginalName}', " +
+                    $"Normalized='{entry.NormalizedName}'",
                     LogLevel.Debug);
             }
 
@@ -1032,10 +948,9 @@ namespace ForageTrackerMod
                 // Keep the original strict area boundary.
                 if (clusterLocs.Count > 0) return false;
             }
-
             return true;
         }
-        private static readonly HashSet<string> IgnoredLocationWords = new(StringComparer.OrdinalIgnoreCase)
+        static readonly HashSet<string> IgnoredLocationWords = new(StringComparer.OrdinalIgnoreCase)
         {
             "Cabin",
             "House",
@@ -1053,11 +968,7 @@ namespace ForageTrackerMod
             name = name.Trim();
 
             // Remove map-point variants such as FishShop_ExtendedHours.
-            name = Regex.Replace(
-                name,
-                @"_ExtendedHours$",
-                "",
-                RegexOptions.IgnoreCase);
+            name = Regex.Replace(name, @"_ExtendedHours$", "", RegexOptions.IgnoreCase);
 
             // Treat underscores as word separators.
             name = name.Replace("_", " ");
@@ -1074,9 +985,7 @@ namespace ForageTrackerMod
             while (end > 0 && IgnoredLocationWords.Contains(parts[end - 1]))
                 end--;
 
-            return string.Join(
-                " ",
-                parts.Take(end)).Trim();
+            return string.Join(" ", parts.Take(end)).Trim();
         }
         private static bool HasStrongNameMatch(string pointName, string candidate)
         {
