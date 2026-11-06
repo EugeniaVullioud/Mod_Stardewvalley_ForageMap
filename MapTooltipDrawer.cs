@@ -290,7 +290,7 @@ namespace ForageTrackerMod
             // have not been manually mapped fall back to the old WorldPositions
             // scoring heuristic. A single hoverable may resolve to several
             // GameLocation names when manually mapped to more than one.
-            MapPointResolver.EnsureBuilt(mapPage);
+            MapPointResolver.EnsureBuilt(mapPage, liveMapKey);
             var points = MapPageCompat.GetPoints(mapPage);
 
             List<string> hoveredLocations = new();

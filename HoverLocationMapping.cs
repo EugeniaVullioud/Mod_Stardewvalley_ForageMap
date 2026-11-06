@@ -212,21 +212,17 @@ namespace ForageTrackerMod
         {
             if (_helper == null || mapPage == null) return;
 
-            MapPointResolver.EnsureBuilt(mapPage);
+            MapPointResolver.EnsureBuilt(mapPage, mapKey);
             var set = EnsureMap(mapKey);
             bool mappingsChanged = false;
 
             // Import explicitly configured custom mappings.
-            var customEntries =
-                CustomHoverMappingStore.GetValidEntries(mapKey);
+            var customEntries = CustomHoverMappingStore.GetValidEntries(mapKey);
 
             foreach (var customEntry in customEntries)
             {
                 var existing = set.Entries.FirstOrDefault(e =>
-                    string.Equals(
-                        e.HoverName,
-                        customEntry.HoverName,
-                        StringComparison.OrdinalIgnoreCase));
+                    string.Equals(e.HoverName, customEntry.HoverName, StringComparison.OrdinalIgnoreCase));
 
                 if (existing == null)
                 {
@@ -291,10 +287,7 @@ namespace ForageTrackerMod
                     string parent = point.name[..slash];
                     string child = point.name[(slash + 1)..];
 
-                    if (string.Equals(
-                        child,
-                        "Default",
-                        StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(child, "Default", StringComparison.OrdinalIgnoreCase))
                     {
                         if (MapPointResolver.IsRealLocation(parent))
                         {
@@ -304,7 +297,7 @@ namespace ForageTrackerMod
                 }
 
                 // Add normalized automatic matches.
-                resolved.AddRange(MapPointResolver.GetNormalizedMatches(point.name));
+                resolved.AddRange(MapPointResolver.GetNormalizedMatches(mapKey, point.name));
 
                 // Retrieve manually configured locations.
                 var custom = CustomHoverMappingStore.GetLocations(mapKey, point.name);
