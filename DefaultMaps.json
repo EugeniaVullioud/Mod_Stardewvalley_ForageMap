@@ -1,0 +1,102 @@
+{
+    "RegionsByMap": {
+        "Town": [
+            {
+                "Name": "Pelican Town",
+                "Locations": [ "Town" ],
+                "Left": 0.481,
+                "Top": 0.261,
+                "Right": 0.831,
+                "Bottom": 0.700,
+                "ColorPacked": 2147525375
+            },
+            {
+                "Name": "Cindersap Forest",
+                "Locations": [ "Forest", "LeahHouse", "WizardHouse", "WizardHouseBasement", "Tent" ],
+                "Left": 0.145,
+                "Top": 0.567,
+                "Right": 0.446,
+                "Bottom": 0.907,
+                "ColorPacked": 2147537988
+            },
+            {
+                "Name": "The Mountain",
+                "Locations": [ "Mountain", "AdventureGuild", "Carpenter" ],
+                "Left": 0.521,
+                "Top": 0.108,
+                "Right": 0.806,
+                "Bottom": 0.262,
+                "ColorPacked": 2156420676
+            },
+            {
+                "Name": "The Beach",
+                "Locations": [ "Beach", "FishShop", "ElliottHouse" ],
+                "Left": 0.5875,
+                "Top": 0.742,
+                "Right": 0.816,
+                "Bottom": 0.958,
+                "ColorPacked": 2147527935
+            },
+            {
+                "Name": "The Farm",
+                "Locations": [ "Farm", "FarmHouse", "Cellar", "Greenhouse" ],
+                "Left": 0.196,
+                "Top": 0.327,
+                "Right": 0.400,
+                "Bottom": 0.569,
+                "ColorPacked": 2164247552
+            },
+            {
+                "Name": "Secret Woods",
+                "Locations": [ "Woods" ],
+                "Left": 0.00,
+                "Top": 0.4075,
+                "Right": 0.1925,
+                "Bottom": 0.574,
+                "ColorPacked": 2147516416
+            },
+            {
+                "Name": "Railroad",
+                "Locations": [ "Railroad", "BathHouseEntry", "BathHousePool", "BathHouseLocker", "WitchSwamp", "WitchHut", "WitchWarpCave" ],
+                "Left": 0.451,
+                "Top": 0.0013,
+                "Right": 0.6658,
+                "Bottom": 0.152,
+                "ColorPacked": 2157543065
+            },
+            {
+                "Name": "Desert",
+                "Locations": [ "Desert" ],
+                "Left": 0.00,
+                "Top": 0.00,
+                "Right": 0.214,
+                "Bottom": 0.222,
+                "ColorPacked": 2164254088
+            },
+            {
+                "Name": "Ginger Island",
+                "Locations": [ "IslandSouth", "IslandNorth", "IslandEast", "IslandWest", "IslandFarmHouse", "IslandFieldOffice", "IslandShrine", "Caldera", "VolcanoDungeon0" ],
+                "Left": 0.8666666,
+                "Top": 0.830,
+                "Right": 1,
+                "Bottom": 1,
+                "ColorPacked": 2164232192
+            }
+        ],
+        "Island": [
+            {
+                "Name": "Ginger Island",
+                "Locations": [ "IslandSouth", "IslandNorth", "IslandEast", "IslandWest" ],
+                "Left": 0.10,
+                "Top": 0.10,
+                "Right": 0.50,
+                "Bottom": 0.50,
+                "ColorPacked": 2164232192
+            }
+        ]
+    },
+    "Bindings": {
+        "Town": "Town",
+        "Island": "Island"
+    }
+}

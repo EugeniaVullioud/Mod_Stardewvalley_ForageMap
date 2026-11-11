@@ -5,13 +5,8 @@ using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
-using xTile.Tiles;
 using System.Text.RegularExpressions;
-using StardewValley.Buildings;
 using StardewValley.WorldMaps;
-
-
-
 
 
 #if DEBUG
@@ -38,14 +33,11 @@ namespace ForageTrackerMod
         /// </summary>
         static Dictionary<string, string> s_bindings = new();
 
-        public static void SetRegionsByMap(Dictionary<string, List<MapRegionData>> regions)
-            => s_regionsByMap = regions;
+        public static void SetRegionsByMap(Dictionary<string, List<MapRegionData>> regions) => s_regionsByMap = regions;
 
-        public static void SetRegionsByMap(string mapKey, List<MapRegionData> regions)
-            => s_regionsByMap[mapKey] = regions;
+        public static void SetRegionsByMap(string mapKey, List<MapRegionData> regions) => s_regionsByMap[mapKey] = regions;
 
-        public static void SetBindings(Dictionary<string, string>? bindings)
-            => s_bindings = bindings ?? new();
+        public static void SetBindings(Dictionary<string, string>? bindings) => s_bindings = bindings ?? new();
 
         /// <summary>
         /// The last DestinationRect computed for the live game MapPage.
@@ -108,11 +100,11 @@ namespace ForageTrackerMod
         // ── Performance debug ─────────────────────────────────────────────────
         // Measures elapsed time per OnRenderedActiveMenu call.
         // Logs a rolling average every 60 frames when DebugMode is on.
-        static readonly System.Diagnostics.Stopwatch _perfWatch    = new();
-        static long  _perfTotalUs    = 0;
-        static int   _perfFrameCount = 0;
-        static int   _perfSpiralRuns = 0;
-        const  int   PerfLogInterval = 60;
+        static readonly System.Diagnostics.Stopwatch _perfWatch = new();
+        static long _perfTotalUs = 0;
+        static int _perfFrameCount = 0;
+        static int _perfSpiralRuns = 0;
+        const int PerfLogInterval = 60;
 #endif
         // =========================================================================
         // Public entry point
@@ -137,7 +129,7 @@ namespace ForageTrackerMod
 #if DEBUG
             // ── Debug overlay — draws BEFORE tooltip so tooltip is on top ─────
             // BEGIN DEBUG BLOCK — remove or set DebugMode = false to disable
-            if (DebugMode) MapDebugRenderer.Draw(b,Monitor,mapPage, mapImageRect, s_regionsByMap, s_bindings);
+            if (DebugMode) MapDebugRenderer.Draw(b, Monitor, mapPage, mapImageRect, s_regionsByMap, s_bindings);
 #endif
             try
             {
@@ -147,7 +139,7 @@ namespace ForageTrackerMod
                 string? regionName = GetRegionAtPoint(mapImageRect, mouseX, mouseY, mapPage);
                 if (regionName == null) return;
 
-                Debugger.DebugLog(Monitor,$"Hovered region: {regionName}", LogLevel.Debug);
+                Debugger.DebugLog(Monitor, $"Hovered region: {regionName}", LogLevel.Debug);
 
                 var locationNames = ResolveLocationNames(regionName, mapPage);
                 if (locationNames.Count == 0)
@@ -163,7 +155,7 @@ namespace ForageTrackerMod
                 bool isVanilla = regionName.StartsWith(VanillaFallbackPrefix, StringComparison.Ordinal);
                 var merged = MergeSummaries(locationNames, includeDescendants: !isVanilla);
                 if (merged.Count == 0)
-                {                  
+                {
                     Debugger.DebugLog(Monitor, $"[Tooltip] Region '{regionName}' has no forage today.", LogLevel.Debug);
                     return;
                 }
@@ -180,7 +172,7 @@ namespace ForageTrackerMod
                 RefreshScaleCache();
                 float vanillaH = Game1.dialogueFont.MeasureString(displayName).Y
                                  + 16f * _cachedUiScale;
-               // DrawForageSummary(b, mouseX, mouseY, vanillaH, merged);
+                // DrawForageSummary(b, mouseX, mouseY, vanillaH, merged);
                 DrawForageSummary(b, mouseX, mouseY, mapPage, merged);
                 Debugger.DebugLog(Monitor, $"it should draw: {displayName}", LogLevel.Debug);
 
@@ -193,19 +185,19 @@ namespace ForageTrackerMod
             finally
             {
                 _perfWatch.Stop();
-                _perfTotalUs    += _perfWatch.ElapsedTicks * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
+                _perfTotalUs += _perfWatch.ElapsedTicks * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
                 _perfFrameCount++;
 
                 if (_perfFrameCount >= PerfLogInterval)
                 {
-                    float avgUs     = (float)_perfTotalUs / _perfFrameCount;
-                    float avgMs     = avgUs / 1000f;
-                    int   spirals   = _perfSpiralRuns;
+                    float avgUs = (float)_perfTotalUs / _perfFrameCount;
+                    float avgMs = avgUs / 1000f;
+                    int spirals = _perfSpiralRuns;
                     /*
                     Debugger.DebugLog(Monitor, $"[TooltipPerf] avg {avgMs:F3} ms/frame over {_perfFrameCount} frames | " +
                         $"spiral re-solves: {spirals} / {_perfFrameCount}", LogLevel.Debug);
                     */
-                    _perfTotalUs    = 0;
+                    _perfTotalUs = 0;
                     _perfFrameCount = 0;
                     _perfSpiralRuns = 0;
                 }
@@ -216,36 +208,7 @@ namespace ForageTrackerMod
         // =========================================================================
         // Region hit test
         // =========================================================================
-        static string ExtractLocationPart(string input, char separator = '/', char extension = '_')
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                return string.Empty;
 
-            var slashIndex = input.IndexOf(separator);
-            if (slashIndex < 0 || slashIndex == input.Length - 1)
-                return string.Empty;
-
-            var afterSlash = input[(slashIndex + 1)..];
-
-            var underscoreIndex = afterSlash.IndexOf(extension);
-            return underscoreIndex >= 0
-                ? afterSlash[..underscoreIndex]
-                : afterSlash;
-        }
-        static string ExtractBeforeSeparator(string input, char separator = '/')
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                return string.Empty;
-
-            // Find the separator
-            var sepIndex = input.IndexOf(separator);
-            if (sepIndex < 0) // separator not found
-                sepIndex = input.Length; // take the whole string
-
-            var beforeSep = input[..sepIndex];
-           
-            return beforeSep;
-        }
         /// <summary>
         /// Determines which region (if any) the mouse is over.
         ///
@@ -282,7 +245,7 @@ namespace ForageTrackerMod
             if (relX < 0f || relX > 1f || relY < 0f || relY > 1f) return null;
 
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey  = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
+            string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
             // ── Resolve the map point under the cursor ───────────────────
             // ResolveAll checks the user's manual mapping (editor's "Edit Map
@@ -329,7 +292,7 @@ namespace ForageTrackerMod
                 foreach (var region in regions)
                 {
                     if (relX >= region.Left && relX <= region.Right &&
-                        relY >= region.Top   && relY <= region.Bottom)
+                        relY >= region.Top && relY <= region.Bottom)
                         return region.Name;
                 }
             }
@@ -393,7 +356,7 @@ namespace ForageTrackerMod
 
             // ── User-defined region ───────────────────────────────────────────
             string liveMapKey = MapKeyHelper.GetMapKey(mapPage);
-            string editorKey  = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
+            string editorKey = ResolveEditorKey.Resolve(liveMapKey, s_bindings);
 
             if (s_regionsByMap.TryGetValue(editorKey, out var regions))
             {
@@ -449,7 +412,7 @@ namespace ForageTrackerMod
         static Dictionary<string, ForageTracker.SummaryEntry> MergeSummaries(
             List<string> locationNames, bool includeDescendants = false)
         {
-            var merged  = new Dictionary<string, ForageTracker.SummaryEntry>(StringComparer.OrdinalIgnoreCase);
+            var merged = new Dictionary<string, ForageTracker.SummaryEntry>(StringComparer.OrdinalIgnoreCase);
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Accumulate forage for a single location into merged.
@@ -463,10 +426,10 @@ namespace ForageTrackerMod
                 {
                     if (!merged.TryGetValue(displayName, out var existing))
                         merged[displayName] = new ForageTracker.SummaryEntry
-                            { ItemId = entry.ItemId, Total = entry.Total, Remaining = entry.Remaining };
+                        { ItemId = entry.ItemId, Total = entry.Total, Remaining = entry.Remaining };
                     else
                     {
-                        existing.Total     += entry.Total;
+                        existing.Total += entry.Total;
                         existing.Remaining += entry.Remaining;
                     }
                 }
@@ -533,7 +496,7 @@ namespace ForageTrackerMod
         // Drawing
         // =========================================================================
 
-        static Rectangle GetVanillaHoverRect( string hoverText, int mouseX, int mouseY)
+        static Rectangle GetVanillaHoverRect(string hoverText, int mouseX, int mouseY)
         {
             if (string.IsNullOrEmpty(hoverText))
                 return Rectangle.Empty;
@@ -544,7 +507,7 @@ namespace ForageTrackerMod
 
             int width = (int)size.X + (int)(32 * uiScale);
 
-            int height =(int)size.Y + (int)(32 * uiScale);
+            int height = (int)size.Y + (int)(32 * uiScale);
 
             int x = mouseX + 32;
             int y = mouseY + 32;
@@ -556,7 +519,7 @@ namespace ForageTrackerMod
 
             return new Rectangle(x, y, width, height);
         }
-        
+
         static void DrawForageSummary(SpriteBatch b, int mouseX, int mouseY, MapPage mapPage, Dictionary<string, ForageTracker.SummaryEntry> summary)
         {
             DisplayMode mode = Config!.Display;
@@ -701,8 +664,6 @@ namespace ForageTrackerMod
                     }
                 }
             }
-
-            return map;
             return map;
         }
 

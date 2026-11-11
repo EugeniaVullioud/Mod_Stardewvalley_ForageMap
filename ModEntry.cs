@@ -47,9 +47,17 @@ namespace ForageTrackerMod
 
             LocationHierarchy.Init(Monitor);
             // Load region data — creates regions.json with defaults on first run
-            _regionConfig = helper.Data.ReadJsonFile<MapRegionConfig>("regions.json")
-                            ?? new MapRegionConfig();
-            helper.Data.WriteJsonFile("regions.json", _regionConfig);
+
+            string configPath = "regions.json";
+            bool isFirstRun = !File.Exists(configPath);
+
+            _regionConfig = helper.Data.ReadJsonFile<MapRegionConfig>(configPath) ?? new MapRegionConfig();
+
+            if (isFirstRun)
+            {
+                DefaultMapRegionLoader.InitializeNewConfig(Helper, Monitor, _regionConfig);
+                helper.Data.WriteJsonFile("regions.json", _regionConfig);
+            }
 
             // Inject dependencies into the drawer
             MapTooltipDrawer.Tracker = _tracker;
@@ -59,7 +67,7 @@ namespace ForageTrackerMod
             MapTooltipDrawer.SetBindings(_regionConfig.Bindings);
 
             // The drawer calls this when the player clicks "Edit Regions"
-           // MapTooltipDrawer.OpenEditorAction = OpenEditor;
+            // MapTooltipDrawer.OpenEditorAction = OpenEditor;
 
             // Always-on events
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
@@ -82,13 +90,13 @@ namespace ForageTrackerMod
             foreach (var debris in e.Added)
             {
                 // debris.item is the actual dropped item (if any)
-                if (debris.item is not StardewValley.Object obj)  continue;
+                if (debris.item is not StardewValley.Object obj) continue;
 
                 // only forageables
                 if (!obj.isForage()) continue;
 
                 var location = e.Location;
-               
+
                 Monitor.Log(
                     $"[ForageTracker] Debris forage added: {obj.DisplayName} " +
                     $"@ ({debris.Chunks?[0]?.position ?? null}) in {location.Name}",
@@ -123,7 +131,7 @@ namespace ForageTrackerMod
 
                 Monitor.Log(
                     $"Removed tracked debris at {tile}",
-                    LogLevel.Debug );
+                    LogLevel.Debug);
 
                 // Rebuild the location key cache in case this location
                 // wasn't tracked before (e.g. first forageable of the day here).
@@ -133,7 +141,7 @@ namespace ForageTrackerMod
                 TooltipPositioner.Invalidate();
 
             }
-           
+
 
         }
         // ── Enabled state — subscribe/unsubscribe pattern ────────────────────────
@@ -186,7 +194,7 @@ namespace ForageTrackerMod
             if (MapTooltipDrawer.OnMapLeftClick((int)cursor.X, (int)cursor.Y))
                 Helper.Input.Suppress(e.Button);*/
 
-            if (!Context.IsWorldReady)  return;
+            if (!Context.IsWorldReady) return;
 
             // =====================================================
             // TEXT INPUT FOR MAP EDITOR
@@ -223,7 +231,7 @@ namespace ForageTrackerMod
                 // Outdoor spawned items: IsSpawnedObject = true (day-start scan).
                 // Indoor re-dropped items: IsSpawnedObject = false, but their
                 // QualifiedItemId is in _knownForageableIds from the day scan.
-                bool isTrackedSpawn   = obj.IsSpawnedObject;
+                bool isTrackedSpawn = obj.IsSpawnedObject;
                 bool isTrackedDropped = _tracker.IsKnownForageableId(obj.QualifiedItemId);
 
                 if (!isTrackedSpawn && !isTrackedDropped) continue;

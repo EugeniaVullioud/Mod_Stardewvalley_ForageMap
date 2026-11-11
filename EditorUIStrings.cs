@@ -54,6 +54,7 @@
         // EDITOR - MAIN
         // ==================================================
         public const string NewMap = "+ New Map";
+        public const string RestoreTabs = "Restore Tabs";
         public const string LeftArrow = "<";
         public const string RightArrow = ">";
 
