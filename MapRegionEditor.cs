@@ -756,7 +756,9 @@ namespace ForageTrackerMod
                 b.DrawString(Game1.smallFont, EditorUIStrings.AreaName,
                     new Vector2(tx, ActiveLayout.NameField.Y - _ui.LabelH), Game1.textColor,
                     0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
-                DrawTextField(b, ActiveLayout.NameField, _fieldName, _nameFocused, _ui);
+
+                string displayName = string.IsNullOrEmpty(_fieldName) ? EditorUIStrings.NewAreaDefault : _fieldName;
+                DrawTextField(b, ActiveLayout.NameField, displayName, _nameFocused, _ui);
 
                 // Location section header
                 b.DrawString(Game1.smallFont, EditorUIStrings.SDVLocations,
@@ -1996,6 +1998,9 @@ namespace ForageTrackerMod
         private void CommitName()
         {
             if (_selectedRegionIndex < 0 || _selectedRegionIndex >= _currentRegions.Count) return;
+            // Don't overwrite the default name if the user hasn't entered anything.
+            if (string.IsNullOrWhiteSpace(_fieldName)) return;
+
             _currentRegions[_selectedRegionIndex].Name = _fieldName.Trim();
         }
 
@@ -2021,11 +2026,13 @@ namespace ForageTrackerMod
                 ColorPacked = 0x8000FF88
             };
 
-            region.TextColor =
-                GetContrastColor(region.Color);
+            region.TextColor = GetContrastColor(region.Color);
 
             _currentRegions.Add(region);
             SelectRegion(_currentRegions.Count - 1);
+
+            // Start with an empty input buffer. "New Area" will be displayed as the placeholder instead.
+            _fieldName = "";
             _nameFocused = true;
         }
 
