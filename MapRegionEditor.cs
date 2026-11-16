@@ -104,9 +104,7 @@ namespace ForageTrackerMod
             }
 
             // Width needed to fit label inside a button with standard padding.
-            public int MeasureBtn(string label) =>
-                (int)Math.Ceiling(Game1.smallFont.MeasureString(label).X * NormalScale)
-                + BtnPadX * 2;
+            public int MeasureBtn(string label) => (int)Math.Ceiling(Game1.smallFont.MeasureString(label).X * NormalScale) + BtnPadX * 2;
         }
 
         UI _ui;
@@ -228,6 +226,7 @@ namespace ForageTrackerMod
         SidebarLayout _layoutWithoutHoverButton;
         SidebarLayout ActiveLayout => IsCurrentTabBoundToLiveMap ? _layoutWithHoverButton : _layoutWithoutHoverButton;
 
+        bool _confirmRestoreDefaultsOpen = false;
 
         // ── Constructor ───────────────────────────────────────────────────────
 
@@ -378,19 +377,9 @@ namespace ForageTrackerMod
 
             // Fixed cost
             int fixedCost =
-                  _ui.LabelH + _ui.FieldH + gap
-                + _ui.LabelH + _ui.FieldH + gap
-                + gap
-                + _ui.BtnH + gap
-                + _ui.LabelH + _ui.SliderH + gap
-                + _ui.BtnH + gap
-                + _ui.LabelH + _ui.SliderH + gap
-                + _ui.LabelH + _ui.SliderH + gap * 2
-                + _ui.BtnH + gap
-                + (showHoverButton ? _ui.BtnH + gap : 0)
-                + _ui.BtnH + gap
-                + _ui.BtnH + gap
-                + _ui.BtnH;
+                  _ui.LabelH + _ui.FieldH + gap + _ui.LabelH + _ui.FieldH + gap + gap
+                + _ui.BtnH + gap + _ui.LabelH + _ui.SliderH + gap + _ui.BtnH + gap + _ui.LabelH + _ui.SliderH + gap + _ui.LabelH + _ui.SliderH + gap * 2
+                + _ui.BtnH + gap + (showHoverButton ? _ui.BtnH + gap : 0) + _ui.BtnH + gap + _ui.BtnH + gap + _ui.BtnH;
 
             // Location list
             int totalAvail = _sideArea.Height - _ui.Pad - headerH;
@@ -500,16 +489,10 @@ namespace ForageTrackerMod
                         continue;
 
                     // Ignore Default because it isn't an actual location assignment.
-                    if (string.Equals(
-                        location,
-                        "Default",
-                        StringComparison.OrdinalIgnoreCase))
-                        continue;
-
+                    if (string.Equals(location, "Default", StringComparison.OrdinalIgnoreCase)) continue;
                     assigned.Add(location);
                 }
             }
-
             return assigned;
         }
         string? FindTabBoundToCurrentMap()
@@ -933,6 +916,9 @@ namespace ForageTrackerMod
             // ── Delete map dialog ────────────────────────────────────────────────
             if (_confirmDeleteMapOpen) DrawDeleteMapDialog(b);
 
+            // Restore defaults dialog
+            if (_confirmRestoreDefaultsOpen) DrawRestoreDefaultsDialog(b);
+
             // ── Hover Mapping panel — full-panel overlay, drawn above everything
             // else in the editor (it is its own tab, not a small dialog) ──────
             if (_hoverPanelOpen) DrawHoverMappingPanel(b);
@@ -1119,6 +1105,23 @@ namespace ForageTrackerMod
             DrawButton(b, ok, EditorUIStrings.Create, new Color(140, 220, 140), _ui);
             DrawButton(b, cancel, EditorUIStrings.Cancel, new Color(220, 120, 120), _ui);
         }
+        void DrawRestoreDefaultsDialog(SpriteBatch b)
+        {
+            var layout = CalculateRestoreDefaultsDialogLayout();
+
+            IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60), layout.Dialog.X, layout.Dialog.Y, layout.Dialog.Width, layout.Dialog.Height, Color.White, drawShadow: true);
+
+            string message =
+                "Restoring default tabs will overwrite all tabs\n" +
+                "with the same names as those in the default file.";
+
+            b.DrawString(Game1.smallFont, message, layout.MessagePosition, Game1.textColor, 0f,
+                Vector2.Zero, layout.MessageScale, SpriteEffects.None, 1f);
+
+            DrawButton(b, layout.AcceptButton, "Accept", new Color(140, 220, 140), _ui);
+
+            DrawButton(b, layout.CancelButton, EditorUIStrings.CancelSimple, new Color(140, 140, 140), _ui);
+        }
         void DrawDeleteMapDialog(SpriteBatch b)
         {
             int dw = 420;
@@ -1127,55 +1130,18 @@ namespace ForageTrackerMod
             int dx = (Game1.uiViewport.Width - dw) / 2;
             int dy = (Game1.uiViewport.Height - dh) / 2;
 
-            IClickableMenu.drawTextureBox(
-                b,
-                Game1.menuTexture,
-                new Rectangle(0, 256, 60, 60),
-                dx,
-                dy,
-                dw,
-                dh,
-                Color.White,
-                drawShadow: true);
+            IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60), dx, dy, dw, dh, Color.White, drawShadow: true);
 
             string msg = $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n{EditorUIStrings.ConfirmDeleteMapWarning}";
 
-            b.DrawString(
-                Game1.smallFont,
-                msg,
-                new Vector2(dx + 16, dy + 16),
-                Color.White,
-                0f,
-                Vector2.Zero,
-                _ui.NormalScale,
-                SpriteEffects.None,
-                1f);
+            b.DrawString(Game1.smallFont, msg, new Vector2(dx + 16, dy + 16), Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
-            Rectangle deleteBtn =
-                new Rectangle(
-                    dx + 16,
-                    dy + dh - 52,
-                    (dw - 48) / 2,
-                    36);
+            Rectangle deleteBtn = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
+            Rectangle cancelBtn = new Rectangle(deleteBtn.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
 
-            Rectangle cancelBtn =
-                new Rectangle(
-                    deleteBtn.Right + 16,
-                    dy + dh - 52,
-                    (dw - 48) / 2,
-                    36);
+            DrawButton(b, deleteBtn, EditorUIStrings.Delete, new Color(220, 100, 80), _ui);
 
-            DrawButton(
-                b,
-                deleteBtn,
-               EditorUIStrings.Delete,
-                new Color(220, 100, 80), _ui);
-
-            DrawButton(
-                b,
-                cancelBtn,
-                EditorUIStrings.CancelSimple,
-                new Color(140, 140, 140), _ui);
+            DrawButton(b, cancelBtn, EditorUIStrings.CancelSimple, new Color(140, 140, 140), _ui);
         }
         // ── Input ─────────────────────────────────────────────────────────────
 
@@ -1200,19 +1166,8 @@ namespace ForageTrackerMod
                 int dx = (Game1.uiViewport.Width - dw) / 2;
                 int dy = (Game1.uiViewport.Height - dh) / 2;
 
-                Rectangle deleteBtn =
-                    new Rectangle(
-                        dx + 16,
-                        dy + dh - 52,
-                        (dw - 48) / 2,
-                        36);
-
-                Rectangle cancelBtn =
-                    new Rectangle(
-                        deleteBtn.Right + 16,
-                        dy + dh - 52,
-                        (dw - 48) / 2,
-                        36);
+                Rectangle deleteBtn = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
+                Rectangle cancelBtn = new Rectangle(deleteBtn.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
 
                 if (deleteBtn.Contains(x, y))
                 {
@@ -1222,6 +1177,23 @@ namespace ForageTrackerMod
                 {
                     _confirmDeleteMapOpen = false;
                     _mapPendingDelete = "";
+                }
+
+                return;
+            }
+            // ── Restore Tabs confirmation ─────────────────────────────────
+            if (_confirmRestoreDefaultsOpen)
+            {
+                var layout = CalculateRestoreDefaultsDialogLayout();
+
+                if (layout.AcceptButton.Contains(x, y))
+                {
+                    _confirmRestoreDefaultsOpen = false;
+                    RestoreDefaultTabs();
+                }
+                else if (layout.CancelButton.Contains(x, y))
+                {
+                    _confirmRestoreDefaultsOpen = false;
                 }
 
                 return;
@@ -1236,8 +1208,7 @@ namespace ForageTrackerMod
                 var ok = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
                 var cancel = new Rectangle(ok.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
 
-                if (ok.Contains(x, y) && _newMapName.Trim().Length > 0)
-                    ConfirmNewMap();
+                if (ok.Contains(x, y) && _newMapName.Trim().Length > 0) ConfirmNewMap();
                 else if (cancel.Contains(x, y))
                 {
                     _newMapDialogOpen = false;
@@ -1248,7 +1219,8 @@ namespace ForageTrackerMod
             }
             if (RestoreDefaultsButton.Contains(x, y))
             {
-                RestoreDefaultTabs();
+                _confirmRestoreDefaultsOpen = true;
+                Game1.playSound("smallSelect");
                 return;
             }
             // ── Dropdown intercepts clicks when open ──────────────────────────
@@ -1456,8 +1428,6 @@ namespace ForageTrackerMod
 
             // ── Map area ──────────────────────────────────────────────────────
             if (IsCurrentTabBoundToLiveMap && _mapPanel.Contains(x, y)) // Avoid editing while not bound
-
-            //if (_mapPanel.Contains(x, y))
             {
                 _draggingOpacity = false;
                 int hit = HitTest(x, y);
@@ -1614,6 +1584,11 @@ namespace ForageTrackerMod
                     _mapPendingDelete = "";
                     return;
                 }
+                if (_confirmRestoreDefaultsOpen)
+                {
+                    _confirmRestoreDefaultsOpen = false;
+                    return;
+                }
                 exitThisMenu();
                 return;
             }
@@ -1648,8 +1623,7 @@ namespace ForageTrackerMod
                 return;
             }
 
-            if (!_nameFocused && !_newMapDialogOpen)
-                base.receiveKeyPress(key);
+            if (!_nameFocused && !_newMapDialogOpen) base.receiveKeyPress(key);
         }
 
         // ── Operations ────────────────────────────────────────────────────────
@@ -1841,9 +1815,9 @@ namespace ForageTrackerMod
         }
         private void LoadSelectedRegionValues()
         {
-            if (!_editMaps.TryGetValue(_currentMapKey, out var regions))                return;
+            if (!_editMaps.TryGetValue(_currentMapKey, out var regions)) return;
 
-            if (_selectedRegionIndex < 0 ||                _selectedRegionIndex >= regions.Count)                return;
+            if (_selectedRegionIndex < 0 || _selectedRegionIndex >= regions.Count) return;
 
             var region = regions[_selectedRegionIndex];
 
@@ -2960,6 +2934,69 @@ namespace ForageTrackerMod
             RestoreDefaultsButton = new Rectangle(_mapArea.Right - buttonW, _mapArea.Bottom + _ui.Pad, buttonW, buttonH);
 
             DrawButton(b, RestoreDefaultsButton, EditorUIStrings.RestoreTabs, Color.White, _ui);
+        }
+        struct RestoreDefaultsDialogLayout
+        {
+            public Rectangle Dialog;
+            public Rectangle AcceptButton;
+            public Rectangle CancelButton;
+            public Vector2 MessagePosition;
+            public float MessageScale;
+        }
+        RestoreDefaultsDialogLayout CalculateRestoreDefaultsDialogLayout()
+        {
+            var layout = new RestoreDefaultsDialogLayout();
+
+            string message =
+                "Restoring default tabs will overwrite all tabs\n" +
+                "with the same names as those in the default file.";
+
+            float scale = _ui.NormalScale;
+
+            int padding = _ui.Pad * 2;
+            int buttonGap = _ui.Pad * 2;
+            int buttonHeight = _ui.BtnH;
+
+            // Button widths based on their actual text.
+            int acceptWidth = _ui.MeasureBtn("Accept");
+            int cancelWidth = _ui.MeasureBtn(EditorUIStrings.CancelSimple);
+
+            // Message dimensions.
+            Vector2 messageSize = Game1.smallFont.MeasureString(message) * scale;
+
+            // Ensure the dialog has enough width for both buttons and the message.
+            int buttonsWidth = acceptWidth + buttonGap + cancelWidth;
+            int contentWidth = Math.Max((int)Math.Ceiling(messageSize.X), buttonsWidth);
+
+            int dialogWidth = contentWidth + padding * 2;
+
+            // Message height and vertical spacing.
+            int messageHeight = (int)Math.Ceiling(messageSize.Y);
+
+            int messageButtonGap = _ui.Pad * 2;
+
+            int dialogHeight = padding * 2 + messageHeight + messageButtonGap + buttonHeight;
+
+            // Center dialog on screen.
+            int dx = (Game1.uiViewport.Width - dialogWidth) / 2;
+            int dy = (Game1.uiViewport.Height - dialogHeight) / 2;
+
+            layout.Dialog = new Rectangle(dx, dy, dialogWidth, dialogHeight);
+
+            // Center message horizontally.
+            layout.MessagePosition = new Vector2(dx + (dialogWidth - messageSize.X) / 2f, dy + padding);
+
+            layout.MessageScale = scale;
+
+            // Center both buttons as a group.
+            int buttonsX = dx + (dialogWidth - buttonsWidth) / 2;
+            int buttonsY = dy + padding + messageHeight + messageButtonGap;
+
+            layout.AcceptButton = new Rectangle(buttonsX, buttonsY, acceptWidth, buttonHeight);
+
+            layout.CancelButton = new Rectangle(layout.AcceptButton.Right + buttonGap, buttonsY, cancelWidth, buttonHeight);
+
+            return layout;
         }
         void RestoreDefaultTabs()
         {
