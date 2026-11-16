@@ -168,6 +168,9 @@ namespace ForageTrackerMod
         readonly MapPage? _mapPage;
         readonly Rectangle _mapPanel;
         Rectangle _mapArea;   // actual image rect (from MapRenderUtility)
+        
+        const int MaxMapNameLength = 30;
+        const int MaxRegionNameLength = 20;
 
         // Sidebar
         readonly Rectangle _sideArea;
@@ -532,10 +535,17 @@ namespace ForageTrackerMod
 
             if (_newMapDialogOpen)
             {
-                _newMapName += c;
-                _newMapError = ""; // clear error as soon as they type
+                if (_newMapName.Length < MaxMapNameLength)
+                {
+                    _newMapName += c;
+                    _newMapError = ""; // clear error as soon as they type
+                }
             }
-            else if (_nameFocused) _fieldName += c;
+            else if (_nameFocused)
+            {
+                if (_fieldName.Length < MaxRegionNameLength)
+                    _fieldName += c;
+            }
         }
 
         // ── Layout ────────────────────────────────────────────────────────────
