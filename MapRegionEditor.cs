@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.BellsAndWhistles;
 using StardewValley.Menus;
 using System.Text.RegularExpressions;
 
@@ -171,6 +172,8 @@ namespace ForageTrackerMod
 
         const int MaxMapNameLength = 30;
         const int MaxRegionNameLength = 20;
+
+        bool _confirmDeleteRegionOpen = false;
 
         // Sidebar
         readonly Rectangle _sideArea;
@@ -927,6 +930,9 @@ namespace ForageTrackerMod
 
             // ── Delete map dialog ────────────────────────────────────────────────
             if (_confirmDeleteMapOpen) DrawDeleteMapDialog(b);
+            
+            // ── Delete region dialog ────────────────────────────────────────────────
+            if (_confirmDeleteRegionOpen) DrawDeleteRegionDialog(b);
 
             // Restore defaults dialog
             if (_confirmRestoreDefaultsOpen) DrawRestoreDefaultsDialog(b);
@@ -1178,6 +1184,50 @@ namespace ForageTrackerMod
                 _ui
             );
         }
+        void DrawDeleteRegionDialog(SpriteBatch b)
+        {
+            var layout = CalculateDeleteRegionDialogLayout();
+
+            IClickableMenu.drawTextureBox(
+                b,
+                Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                layout.Dialog.X,
+                layout.Dialog.Y,
+                layout.Dialog.Width,
+                layout.Dialog.Height,
+                Color.White,
+                drawShadow: true
+            );
+
+            b.DrawString(
+                Game1.smallFont,
+                layout.Message,
+                layout.MessagePosition,
+                Color.White,
+                0f,
+                Vector2.Zero,
+                _ui.NormalScale,
+                SpriteEffects.None,
+                1f
+            );
+
+            DrawButton(
+                b,
+                layout.DeleteButton,
+                EditorUIStrings.Delete,
+                new Color(220, 100, 80),
+                _ui
+            );
+
+            DrawButton(
+                b,
+                layout.CancelButton,
+                EditorUIStrings.CancelSimple,
+                new Color(140, 140, 140),
+                _ui
+            );
+        }
         // ── Input ─────────────────────────────────────────────────────────────
 
         public override void receiveLeftClick(int x, int y, bool playSound = true)
@@ -1192,7 +1242,7 @@ namespace ForageTrackerMod
             }
             UpdateSidebarLayoutState();
 
-            // ── Delete confirmation ─────────────────────────────────
+            // ── Delete Map confirmation ─────────────────────────────────
             if (_confirmDeleteMapOpen)
             {
                 var layout = CalculateDeleteMapDialogLayout();
@@ -1222,6 +1272,23 @@ namespace ForageTrackerMod
                 else if (layout.CancelButton.Contains(x, y))
                 {
                     _confirmRestoreDefaultsOpen = false;
+                }
+
+                return;
+            }
+            // ── Delete Region confirmation ─────────────────────────────────
+            if (_confirmDeleteRegionOpen)
+            {
+                var layout = CalculateDeleteRegionDialogLayout();
+
+                if (layout.DeleteButton.Contains(x, y))
+                {
+                    _confirmDeleteRegionOpen = false;
+                    DeleteSelected();
+                }
+                else if (layout.CancelButton.Contains(x, y))
+                {
+                    _confirmDeleteRegionOpen = false;
                 }
 
                 return;
@@ -1332,11 +1399,14 @@ namespace ForageTrackerMod
                 if (IsCurrentTabBoundToLiveMap) AddRegion();
                 return;
             }
-            // if (ActiveLayout.DeleteRegionButton.Contains(x, y)) { DeleteSelected(); return; }
             // Delete Region
             if (ActiveLayout.DeleteRegionButton.Contains(x, y))
             {
-                if (IsCurrentTabBoundToLiveMap && _selectedRegionIndex >= 0) DeleteSelected();
+                if (IsCurrentTabBoundToLiveMap && _selectedRegionIndex >= 0 && _selectedRegionIndex < _currentRegions.Count)
+                {
+                    _confirmDeleteRegionOpen = true;
+                    Game1.playSound("smallSelect");
+                }
                 return;
             }
             if (ActiveLayout.ColorButton.Contains(x, y)) { CycleColor(); return; }
@@ -1792,6 +1862,83 @@ namespace ForageTrackerMod
 
             return layout;
         }
+
+        DeleteMapDialogLayout CalculateDeleteRegionDialogLayout()
+        {
+            var layout = new DeleteMapDialogLayout();
+
+            int dw = 420;
+            int padding = _ui.Pad * 2;
+            int buttonGap = _ui.Pad * 2;
+
+            float scale = _ui.NormalScale;
+
+            string regionName =
+                _selectedRegionIndex >= 0 &&
+                _selectedRegionIndex < _currentRegions.Count
+                    ? _currentRegions[_selectedRegionIndex].Name
+                    : "";
+
+            string rawMessage =
+                $"Are you sure you want to delete \"{regionName}\"?\n" +
+                "This action cannot be undone.";
+
+            // Available text width inside the dialog.
+            int textWidth = dw - padding * 2;
+
+            layout.Message = WrapText(rawMessage, textWidth, scale);
+
+            Vector2 messageSize =
+                Game1.smallFont.MeasureString(layout.Message) * scale;
+
+            int messageHeight = (int)Math.Ceiling(messageSize.Y);
+
+            int buttonHeight = _ui.BtnH;
+
+            int deleteWidth = _ui.MeasureBtn(EditorUIStrings.Delete);
+            int cancelWidth = _ui.MeasureBtn(EditorUIStrings.CancelSimple);
+
+            int buttonsWidth = deleteWidth + buttonGap + cancelWidth;
+
+            // Expand dialog width if necessary.
+            dw = Math.Max(dw, buttonsWidth + padding * 2);
+
+            int dh =
+                padding * 2 +
+                messageHeight +
+                _ui.Pad * 2 +
+                buttonHeight;
+
+            int dx = (Game1.uiViewport.Width - dw) / 2;
+            int dy = (Game1.uiViewport.Height - dh) / 2;
+
+            layout.Dialog = new Rectangle(dx, dy, dw, dh);
+
+            layout.MessagePosition = new Vector2(
+                dx + padding,
+                dy + padding
+            );
+
+            int buttonsX = dx + (dw - buttonsWidth) / 2;
+            int buttonsY = dy + padding + messageHeight + _ui.Pad * 2;
+
+            layout.DeleteButton = new Rectangle(
+                buttonsX,
+                buttonsY,
+                deleteWidth,
+                buttonHeight
+            );
+
+            layout.CancelButton = new Rectangle(
+                layout.DeleteButton.Right + buttonGap,
+                buttonsY,
+                cancelWidth,
+                buttonHeight
+            );
+
+            return layout;
+        }
+        
         // ── Operations ────────────────────────────────────────────────────────
 
         // Error message shown when the player tries to create a duplicate map name.
