@@ -168,7 +168,7 @@ namespace ForageTrackerMod
         readonly MapPage? _mapPage;
         readonly Rectangle _mapPanel;
         Rectangle _mapArea;   // actual image rect (from MapRenderUtility)
-        
+
         const int MaxMapNameLength = 30;
         const int MaxRegionNameLength = 20;
 
@@ -1085,7 +1085,7 @@ namespace ForageTrackerMod
         void DrawNewMapDialog(SpriteBatch b)
         {
             bool hasError = _newMapError.Length > 0;
-            int dw = 360, dh = hasError ? 195 : 160;
+            int dw = 360, dh = hasError ? 205 : 175;
             int dx = (Game1.uiViewport.Width - dw) / 2;
             int dy = (Game1.uiViewport.Height - dh) / 2;
 
@@ -1097,7 +1097,7 @@ namespace ForageTrackerMod
                 new Vector2(dx + 16, dy + 16), Game1.textColor,
                 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
 
-            var field = new Rectangle(dx + 16, dy + 52, dw - 32, 34);
+            var field = new Rectangle(dx + 16, dy + 52, dw - 32, _ui.FieldH);
             DrawTextField(b, field, _newMapName, true, _ui);
 
             // Error message (duplicate name)
@@ -1134,24 +1134,47 @@ namespace ForageTrackerMod
         }
         void DrawDeleteMapDialog(SpriteBatch b)
         {
-            int dw = 420;
-            int dh = 180;
+            var layout = CalculateDeleteMapDialogLayout();
 
-            int dx = (Game1.uiViewport.Width - dw) / 2;
-            int dy = (Game1.uiViewport.Height - dh) / 2;
+            IClickableMenu.drawTextureBox(
+                b,
+                Game1.menuTexture,
+                new Rectangle(0, 256, 60, 60),
+                layout.Dialog.X,
+                layout.Dialog.Y,
+                layout.Dialog.Width,
+                layout.Dialog.Height,
+                Color.White,
+                drawShadow: true
+            );
 
-            IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60), dx, dy, dw, dh, Color.White, drawShadow: true);
+            b.DrawString(
+                Game1.smallFont,
+                layout.Message,
+                layout.MessagePosition,
+                Color.White,
+                0f,
+                Vector2.Zero,
+                _ui.NormalScale,
+                SpriteEffects.None,
+                1f
+            );
 
-            string msg = $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n{EditorUIStrings.ConfirmDeleteMapWarning}";
+            DrawButton(
+                b,
+                layout.DeleteButton,
+                EditorUIStrings.Delete,
+                new Color(220, 100, 80),
+                _ui
+            );
 
-            b.DrawString(Game1.smallFont, msg, new Vector2(dx + 16, dy + 16), Color.White, 0f, Vector2.Zero, _ui.NormalScale, SpriteEffects.None, 1f);
-
-            Rectangle deleteBtn = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
-            Rectangle cancelBtn = new Rectangle(deleteBtn.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
-
-            DrawButton(b, deleteBtn, EditorUIStrings.Delete, new Color(220, 100, 80), _ui);
-
-            DrawButton(b, cancelBtn, EditorUIStrings.CancelSimple, new Color(140, 140, 140), _ui);
+            DrawButton(
+                b,
+                layout.CancelButton,
+                EditorUIStrings.CancelSimple,
+                new Color(140, 140, 140),
+                _ui
+            );
         }
         // ── Input ─────────────────────────────────────────────────────────────
 
@@ -1170,20 +1193,13 @@ namespace ForageTrackerMod
             // ── Delete confirmation ─────────────────────────────────
             if (_confirmDeleteMapOpen)
             {
-                int dw = 420;
-                int dh = 180;
+                var layout = CalculateDeleteMapDialogLayout();
 
-                int dx = (Game1.uiViewport.Width - dw) / 2;
-                int dy = (Game1.uiViewport.Height - dh) / 2;
-
-                Rectangle deleteBtn = new Rectangle(dx + 16, dy + dh - 52, (dw - 48) / 2, 36);
-                Rectangle cancelBtn = new Rectangle(deleteBtn.Right + 16, dy + dh - 52, (dw - 48) / 2, 36);
-
-                if (deleteBtn.Contains(x, y))
+                if (layout.DeleteButton.Contains(x, y))
                 {
                     DeleteCurrentMap();
                 }
-                else if (cancelBtn.Contains(x, y))
+                else if (layout.CancelButton.Contains(x, y))
                 {
                     _confirmDeleteMapOpen = false;
                     _mapPendingDelete = "";
@@ -1605,22 +1621,9 @@ namespace ForageTrackerMod
 
             if (key == Keys.Back)
             {
-                if (_hoverPanelOpen)
-                {
-                    if (_hoverFilterFocused && _hoverFilterText.Length > 0)
-                    {
-                        _hoverFilterText = _hoverFilterText[..^1];
-                        OnHoverFilterTextChanged();
-                    }
-                    return;
-                }
-                if (_newMapDialogOpen && _newMapName.Length > 0)
-                {
-                    _newMapName = _newMapName[..^1];
-                    _newMapError = "";
-                }
-                else if (_nameFocused && _fieldName.Length > 0)
-                    _fieldName = _fieldName[..^1];
+                DeleteFocusedCharacter();
+
+                _backspaceRepeatTimer = BackspaceInitialDelay;
                 return;
             }
 
@@ -1635,7 +1638,158 @@ namespace ForageTrackerMod
 
             if (!_nameFocused && !_newMapDialogOpen) base.receiveKeyPress(key);
         }
+        public override void update(GameTime time)
+        {
+            base.update(time);
 
+            if (Microsoft.Xna.Framework.Input.Keyboard.GetState().IsKeyDown(Keys.Back))
+            {
+                _backspaceRepeatTimer -= (float)time.ElapsedGameTime.TotalMilliseconds;
+
+                if (_backspaceRepeatTimer <= 0f)
+                {
+                    DeleteFocusedCharacter();
+                    _backspaceRepeatTimer = BackspaceRepeatInterval;
+                }
+            }
+        }
+        string WrapText(string text, float maxWidth, float scale)
+        {
+            var lines = new List<string>();
+
+            foreach (string paragraph in text.Split('\n'))
+            {
+                string currentLine = "";
+
+                foreach (string originalWord in paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string word = originalWord;
+
+                    string candidate = string.IsNullOrEmpty(currentLine)
+                        ? word
+                        : currentLine + " " + word;
+
+                    // Normal word wrapping.
+                    if (Game1.smallFont.MeasureString(candidate).X * scale <= maxWidth)
+                    {
+                        currentLine = candidate;
+                        continue;
+                    }
+
+                    // Finish the current line.
+                    if (!string.IsNullOrEmpty(currentLine))
+                    {
+                        lines.Add(currentLine);
+                        currentLine = "";
+                    }
+
+                    // Break unusually long words into smaller pieces.
+                    while (word.Length > 0)
+                    {
+                        int fitLength = word.Length;
+
+                        while (fitLength > 1 &&
+                               Game1.smallFont.MeasureString(word[..fitLength]).X * scale > maxWidth)
+                        {
+                            fitLength--;
+                        }
+
+                        string part = word[..fitLength];
+                        word = word[fitLength..];
+
+                        if (word.Length > 0)
+                        {
+                            lines.Add(part);
+                        }
+                        else
+                        {
+                            currentLine = part;
+                        }
+                    }
+                }
+
+                lines.Add(currentLine);
+            }
+
+            return string.Join("\n", lines);
+        }
+        struct DeleteMapDialogLayout
+        {
+            public Rectangle Dialog;
+            public Rectangle DeleteButton;
+            public Rectangle CancelButton;
+            public Vector2 MessagePosition;
+            public string Message;
+        }
+
+        private DeleteMapDialogLayout CalculateDeleteMapDialogLayout()
+        {
+            var layout = new DeleteMapDialogLayout();
+
+            int dw = 420;
+            int padding = _ui.Pad * 2;
+            int buttonGap = _ui.Pad * 2;
+
+            float scale = _ui.NormalScale;
+
+            string rawMessage =
+                $"{EditorUIStrings.ConfirmDeleteMapInstruction} \"{_mapPendingDelete}\"?\n" +
+                $"{EditorUIStrings.ConfirmDeleteMapWarning}";
+
+            // Available text width inside the dialog.
+            int textWidth = dw - padding * 2;
+
+            layout.Message = WrapText(rawMessage, textWidth, scale);
+
+            Vector2 messageSize = Game1.smallFont.MeasureString(layout.Message) * scale;
+
+            int messageHeight = (int)Math.Ceiling(messageSize.Y);
+
+            int buttonHeight = _ui.BtnH;
+
+            int deleteWidth = _ui.MeasureBtn(EditorUIStrings.Delete);
+            int cancelWidth = _ui.MeasureBtn(EditorUIStrings.CancelSimple);
+
+            int buttonsWidth = deleteWidth + buttonGap + cancelWidth;
+
+            // Expand dialog width if necessary.
+            dw = Math.Max(dw, buttonsWidth + padding * 2);
+
+            int dh =
+                padding * 2 +
+                messageHeight +
+                _ui.Pad * 2 +
+                buttonHeight;
+
+            int dx = (Game1.uiViewport.Width - dw) / 2;
+            int dy = (Game1.uiViewport.Height - dh) / 2;
+
+            layout.Dialog = new Rectangle(dx, dy, dw, dh);
+
+            layout.MessagePosition = new Vector2(
+                dx + padding,
+                dy + padding
+            );
+
+            int buttonsX = dx + (dw - buttonsWidth) / 2;
+            int buttonsY = dy + padding + messageHeight + _ui.Pad * 2;
+
+            layout.DeleteButton = new Rectangle(
+                buttonsX,
+                buttonsY,
+                deleteWidth,
+                buttonHeight
+            );
+
+            layout.CancelButton = new Rectangle(
+                layout.DeleteButton.Right + buttonGap,
+                buttonsY,
+                cancelWidth,
+                buttonHeight
+            );
+
+            return layout;
+        }
         // ── Operations ────────────────────────────────────────────────────────
 
         // Error message shown when the player tries to create a duplicate map name.
@@ -2814,20 +2968,67 @@ namespace ForageTrackerMod
             Sq(r.X, r.Y + r.Height / 2);
             Sq(r.Right, r.Y + r.Height / 2);
         }
+        float _backspaceRepeatTimer = 0f;
 
-        private static void DrawTextField(SpriteBatch b, Rectangle r, string text, bool active, UI ui)
+        const float BackspaceInitialDelay = 400f;
+        const float BackspaceRepeatInterval = 45f;
+
+        void DeleteFocusedCharacter()
+        {
+            if (_hoverPanelOpen)
+            {
+                if (_hoverFilterFocused && _hoverFilterText.Length > 0)
+                {
+                    _hoverFilterText = _hoverFilterText[..^1];
+                    OnHoverFilterTextChanged();
+                }
+                return;
+            }
+
+            if (_newMapDialogOpen && _newMapName.Length > 0)
+            {
+                _newMapName = _newMapName[..^1];
+                _newMapError = "";
+            }
+            else if (_nameFocused && _fieldName.Length > 0)
+            {
+                _fieldName = _fieldName[..^1];
+            }
+        }
+        static void DrawTextField(SpriteBatch b, Rectangle r, string text, bool active, UI ui)
         {
             b.Draw(Game1.fadeToBlackRect, r, Color.Black * 0.45f);
             DrawBorder(b, r, active ? Color.White : Color.Gray, 2);
 
-            string visible = text;
-            while (Game1.smallFont.MeasureString(visible).X * ui.SmallScale > r.Width - 10
-                   && visible.Length > 0)
-                visible = visible[1..];
+            float scale = ui.NormalScale;
+            float maxWidth = r.Width - 12;
 
-            b.DrawString(Game1.smallFont, visible + (active ? "|" : ""),
-                new Vector2(r.X + 5, r.Y + 5),
-                Color.White, 0f, Vector2.Zero, ui.NormalScale, SpriteEffects.None, 1f);
+            // Always use a cursor, even when the field is empty.
+            string visible = text;
+
+            while (Game1.smallFont.MeasureString(visible + (active ? "|" : "")).X * scale > maxWidth && visible.Length > 0)
+            {
+                visible = visible[1..];
+            }
+
+            string displayText = visible + (active ? "|" : "");
+
+            Vector2 textSize = Game1.smallFont.MeasureString(displayText) * scale;
+
+            // Center vertically based on the actual displayed text.
+            Vector2 position = new Vector2(r.X + 6, r.Y + (r.Height - textSize.Y) / 2f);
+
+            b.DrawString(
+                Game1.smallFont,
+                displayText,
+                position,
+                Color.White,
+                0f,
+                Vector2.Zero,
+                scale,
+                SpriteEffects.None,
+                1f
+            );
         }
 
         private static void DrawButton(SpriteBatch b, Rectangle r, string label, Color tint, UI ui)
